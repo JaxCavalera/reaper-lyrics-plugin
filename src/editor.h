@@ -12,6 +12,7 @@ public:
   void Show(bool show);
   void Toggle() { Show(!IsVisible()); }
   bool IsVisible() const;
+  HWND Hwnd() const { return m_hwnd; }
   void BindTrack(MediaTrack* t);
   void OnTimer();          // called from the plugin timer (UI thread)
   void RefreshText();      // model -> text widget, caret preserving

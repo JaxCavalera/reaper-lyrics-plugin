@@ -583,6 +583,8 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 #ifdef _WIN32
   case WM_GETMINMAXINFO: { MINMAXINFO* mi = (MINMAXINFO*)lp; mi->ptMinTrackSize.x = 560; mi->ptMinTrackSize.y = 240; return 0; }
   case WM_ERASEBKGND: SetWindowLongPtr(h, DWLP_MSGRESULT, 1); return 1;
+  // the dialog manager otherwise treats typed characters as mnemonics and drops them
+  case WM_GETDLGCODE: SetWindowLongPtr(h, DWLP_MSGRESULT, DLGC_WANTALLKEYS | DLGC_WANTCHARS | DLGC_WANTARROWS | DLGC_WANTTAB); return 1;
 #else
   case WM_ERASEBKGND: return 1;
 #endif

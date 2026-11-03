@@ -64,6 +64,33 @@ static void MenuHook(const char* menuid, void* menu, int flag)
   InsertMenu(hm, at, MF_BYPOSITION | MF_STRING, g_cmdInsert, "Insert lyric track");
 }
 
+// REAPER routes keystrokes through its accelerator processing first. Without this hook,
+// keys aimed at the editor are treated as dialog mnemonics / REAPER shortcuts and typed
+// characters never arrive. While the editor has focus we deliver keys to it ourselves,
+// except F-keys and Ctrl shortcuts the editor doesn't use, which go to REAPER (Ctrl+S etc).
+static int TranslateAccel(MSG* msg, accelerator_register_t*)
+{
+  HWND ed = LyricEditor::Get().Hwnd();
+  if (!ed || !msg->hwnd || (msg->hwnd != ed && !IsChild(ed, msg->hwnd))) return 0;
+  UINT m = msg->message;
+  if (m == WM_SYSKEYDOWN || m == WM_SYSKEYUP) return 0;          // Alt combos: REAPER's business
+  if (m == WM_KEYDOWN)
+  {
+    int vk = (int)msg->wParam;
+    if (vk >= VK_F1 && vk <= VK_F24) return -666;
+    if (CtrlDown() && vk >= 'A' && vk <= 'Z' && !strchr("ACXVZY", vk)) return -666;
+  }
+#ifdef _WIN32
+  if (m == WM_KEYDOWN) TranslateMessage(msg);                     // generates the WM_CHAR we insert
+  DispatchMessage(msg);
+  return 1;
+#else
+  return -1;                                                      // SWELL delivers characters in WM_KEYDOWN
+#endif
+}
+
+static accelerator_register_t g_accelHook = { TranslateAccel, true, nullptr };
+
 static void TimerFn()
 {
   LyricEditor::Get().OnTimer();
@@ -89,6 +116,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
       plugin_register("-hookcommand", (void*)HookCommand);
       plugin_register("-hookcustommenu", (void*)MenuHook);
       plugin_register("-toggleaction", (void*)ToggleAction);
+      plugin_register("-accelerator", (void*)&g_accelHook);
     }
     return 0;
   }
@@ -107,5 +135,6 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   rec->Register("toggleaction", (void*)ToggleAction);
   rec->Register("hookcustommenu", (void*)MenuHook);
   rec->Register("timer", (void*)TimerFn);
+  rec->Register("accelerator", &g_accelHook);
   return 1;
 }
