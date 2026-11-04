@@ -119,7 +119,7 @@ void LyricEditor::LayoutControls()
   m_buttons.push_back({ { 8, 7, 228, kToolbarH - 7 }, "", BTN_TRACKSEL, false });
   m_buttons.push_back({ { 236, 7, 312, kToolbarH - 7 }, "Track", BTN_TRACK, true });
   m_buttons.push_back({ { 320, 7, 424, kToolbarH - 7 }, "Lyrics panel", BTN_PANEL, true });
-  m_buttons.push_back({ { 440, 7, 508, kToolbarH - 7 }, "Zoom â", BTN_ZOOM_OUT, false });
+  m_buttons.push_back({ { 440, 7, 508, kToolbarH - 7 }, "Zoom -", BTN_ZOOM_OUT, false });
   m_buttons.push_back({ { 512, 7, 580, kToolbarH - 7 }, "Zoom +", BTN_ZOOM_IN, false });
   m_buttons.push_back({ { 584, 7, 628, kToolbarH - 7 }, "Fit", BTN_ZOOM_FIT, false });
   if (m_renaming) CommitRename(true);
