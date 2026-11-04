@@ -750,7 +750,7 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
     case HIT_RULER: SetEditCurPos2(g_doc.proj, std::max(0.0, t), false, true); break;
     case HIT_BLOCK: g_doc.DragBlockTo(m_laneBlock, t - m_laneGrab); m_laneDrop = ReorderTarget(m_laneBlock, t); break;
     case HIT_BLOCK_LEFT: g_doc.DragBlockEdge(m_laneBlock, true, t); break;
-    case HIT_BLOCK_RIGHT: g_doc.DragBlockEdge(m_laneBlock, false, t); break;
+    case HIT_BLOCK_RIGHT: g_doc.DragBlockEdge(m_laneBlock, false, t, !ShiftDown()); break;   // Shift: no ripple
     case HIT_LINE_EDGE: g_doc.DragLineStart(m_laneBlock, m_laneLine, t); break;
     default: break;
     }

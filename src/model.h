@@ -79,7 +79,10 @@ public:
 
   // sequencer drags: apply live without an undo point, then EndDrag(name) adds one
   void DragBlockTo(int i, double newStart);              // clamped into the free space around it
-  void DragBlockEdge(int i, bool left, double t);        // resize, clamped by neighbours
+  // Resize. Right edge with ripple (the default in the sequencer): the next block snaps to the
+  // new end and every later block shifts by the same amount, keeping the gaps between them.
+  // Without ripple (and always for the left edge) the edge stops at the neighbour.
+  void DragBlockEdge(int i, bool left, double t, bool ripple = false);
   void DragLineStart(int b, int line, double t);         // line > 0, clamped between its neighbours
   void EndDrag(const char* undoName);
 

@@ -22,7 +22,10 @@ lines are laid out in full colour and can be moved, stretched and reordered.
   - a timeline lane with a bar ruler, the **blocks** as solid coloured bars with their label,
     and each block's **lines** as coloured segments underneath;
   - drag a block to move it within the free space around it, or past a neighbour's middle to
-    swap their order; drag a block's edges to extend/contract it (its lines scale with it);
+    swap their order; drag a block's edges to extend/contract it (its lines scale with it).
+    Dragging the right edge ripples: the next block snaps against it and every later block
+    moves by the same amount, keeping the gaps between them — hold **Shift** to resize without
+    moving anything else (the edge then stops at the next block);
     drag the boundary between two lines to retime them. Blocks never overlap;
   - click the ruler to move the edit cursor; wheel scrolls, Ctrl+wheel zooms; the playhead
     is followed while playing with *Track* on;

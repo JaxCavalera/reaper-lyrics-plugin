@@ -301,6 +301,35 @@ int main()
     CHECK(OnlyTheLyricItem());
   }
 
+  // --- ripple resize (the sequencer default): the next block snaps to the new end and later
+  //     blocks follow, keeping the gaps between them
+  {
+    auto& B = g_doc.blocks;
+    g_doc.DragBlockEdge(2, true, B[2].start + 1.0);                // open a 1 s gap between blocks 1 and 2
+    double gap12 = B[2].start - B[1].end;
+    CHECK(Near(gap12, 1.0));
+    CHECK(B[1].start - B[0].end > 1.0);                            // and there's a gap between 0 and 1
+    double len1 = B[1].Len(), len2 = B[2].Len();
+    std::vector<double> rel1;
+    for (auto& l : B[1].lines) rel1.push_back(l.pos - B[1].start);
+
+    g_doc.DragBlockEdge(0, false, B[0].end + 1.5, true);           // extend block 0
+    CHECK(Near(B[1].start, B[0].end));                             // next block snapped against it
+    CHECK(Near(B[2].start - B[1].end, gap12));                     // later gap kept
+    CHECK(Near(B[1].Len(), len1) && Near(B[2].Len(), len2));       // lengths kept
+    for (size_t k = 0; k < rel1.size() && k < B[1].lines.size(); k++) CHECK(Near(B[1].lines[k].pos - B[1].start, rel1[k]));
+
+    double end2 = B[2].end;
+    g_doc.DragBlockEdge(0, false, B[0].start + 0.01, true);        // shrink block 0: the rest follow back
+    CHECK(Near(B[0].Len(), g_doc.MinBlockLen()));
+    CHECK(Near(B[1].start, B[0].end));
+    CHECK(Near(B[2].start - B[1].end, gap12));
+    CHECK(B[2].end < end2);
+    g_doc.EndDrag("Lyrics: resize block");
+    Sync();
+    CHECK(NoOverlaps() && ItemFits() && OnlyTheLyricItem());
+  }
+
   // --- reorder: moves blocks, keeps them packed and non-overlapping
   {
     std::string first = g_doc.blocks[0].Text();

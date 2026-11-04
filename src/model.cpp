@@ -860,11 +860,28 @@ void LyricDoc::DragBlockTo(int i, double newStart)
   Write();
 }
 
-void LyricDoc::DragBlockEdge(int i, bool left, double t)
+void LyricDoc::DragBlockEdge(int i, bool left, double t, bool ripple)
 {
   if (!ValidateTrack() || i < 0 || i >= (int)blocks.size()) return;
   LyricBlock& b = blocks[i];
   double os = b.start, ol = b.Len();
+  if (!left && ripple)
+  {
+    b.end = std::max(t, b.start + MinBlockLen());
+    ScaleLines(b, os, ol);
+    if (i + 1 < (int)blocks.size())
+    {
+      double d = b.end - blocks[i + 1].start;   // snap the next block against this one...
+      for (size_t j = i + 1; j < blocks.size(); j++)   // ...and carry the rest along, gaps intact
+      {
+        LyricBlock& n = blocks[j];
+        n.start += d; n.end += d;
+        for (auto& l : n.lines) l.pos += d;
+      }
+    }
+    Write();
+    return;
+  }
   if (left)
   {
     double lo = i > 0 ? blocks[i - 1].end : 0.0, hi = b.end - MinBlockLen();
