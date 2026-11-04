@@ -1,49 +1,55 @@
 # REAPER Lyrics — lyric tracks for the REAPER timeline
 
 A native REAPER extension (`reaper_lyrics.dll` on Windows, `reaper_lyrics.so` on Linux) that
-adds **lyric tracks**: paragraphs of lyrics that live on the timeline as coloured, draggable
-blocks with a marker for every line.
+adds **lyric tracks**. Like a MIDI item, a lyric track holds a single **lyric item** on the
+timeline; double-click it to open the **lyric sequencer**, where the song's lyric blocks and
+lines are laid out in full colour and can be moved, stretched and reordered.
 
 ## What you get
 
 - **Insert lyric track** in the track-panel right-click menu (next to *Insert track from
   template…*), in the main **Track** menu, and as an action (`Lyrics: Insert lyric track`).
-- Every **block** (paragraph) is an empty item on the lyric track, coloured with the block
-  colour and showing just the block label (the lyrics are kept in the item's ext state, so
-  they don't clutter the timeline). Drag the item to reorder blocks, drag its edges to
-  extend/contract the block — the lines inside scale with it. A block never overlaps the
-  next one: stretch or drop an item over its neighbour and it's trimmed back to the
-  neighbour's start.
-- A new lyric track starts with one empty INTRO block — no placeholder text. Clearing all the
-  text keeps that first block (and its timing). **+ Block** puts the caret on a fresh
-  paragraph; the block appears on the timeline as soon as you type its first line.
-- Every **line** gets a project marker (a *sub-marker*) in the block's colour. Drag a marker
-  to move that line within its block; the gap to the next marker is the line's duration.
-  Dragging the first marker moves the block's start.
+  The track gets one lyric item with an empty INTRO block at the edit cursor, and the
+  sequencer opens ready to type.
+- **One lyric item per track.** It holds the whole lyric document (blocks, labels, colours,
+  line timings) with times relative to the item, so moving the item moves the lyrics. It
+  auto-fits: it always starts at the first block and never ends before the last one (drag its
+  right edge further to leave space at the end). Nothing else is added to the main timeline —
+  no project markers.
+- **Double-click the lyric item** to open the sequencer (any other item double-click behaves
+  as usual).
+- **Lyric sequencer** window:
+  - a timeline lane with a bar ruler, the **blocks** as solid coloured bars with their label,
+    and each block's **lines** as coloured segments underneath;
+  - drag a block to move it within the free space around it, or past a neighbour's middle to
+    swap their order; drag a block's edges to extend/contract it (its lines scale with it);
+    drag the boundary between two lines to retime them. Blocks never overlap;
+  - click the ruler to move the edit cursor; wheel scrolls, Ctrl+wheel zooms; the playhead
+    is followed while playing with *Track* on;
+  - click a block or line to jump to it in the text; double-click a block or its label chip
+    to rename it; right-click for label presets, colour, delete;
+  - below the lane, the **lyric text**: one blank line starts a new block. Edits are diffed
+    against the existing blocks so timings survive typing. Drag a label chip in the gutter
+    up or down to move a whole block.
 - Labels follow **INTRO, VERSE, CHORUS, VERSE, CHORUS, … OUTRO** automatically until you
-  rename a block. Click a label chip in the editor's gutter to rename it, pick a preset,
-  or change its colour (the item and its markers recolour too).
-- **Lyric editor** window: one blank line starts a new block. Edits are diffed against the
-  existing blocks so timings survive typing. Drag a label chip up or down to slide a whole
-  block (its timeline slot moves with it).
-- **Track** toggle: the editor follows playback, keeping the current block near the top
+  rename a block; colours follow the label until you pick one.
+- An empty editor is still one block — there's no placeholder text, and clearing the text
+  keeps the first block. **+ Block** puts the caret on a fresh paragraph; the block appears
+  as soon as you type its first line.
+- **Track** toggle: the sequencer follows playback, keeping the current block near the top
   and highlighting the current line. Untick it to edit freely while REAPER plays.
 - **Live typing**: with *Track* on and transport playing, press **Enter** to stamp the play
   position on the next line (single return) or the next block (double return). Blocks
   auto-size as you go.
 - **Lyrics panel**: a floating, resizable window (position remembered) that shows the
   current line large with the lines around it, coloured by block.
+- **Undo**: everything goes through REAPER's undo. Typing becomes one undo step per pause
+  rather than one per keystroke.
 
-Everything is stored in the project itself (items, markers, item ext-state), so the project
-file carries the lyrics; only window positions go in `reaper_lyrics.ini` in REAPER's
-resource folder.
-
-How strongly an item's colour fills its background is a REAPER theme setting, not per item:
-the action *Theme Development: Show theme tweak/configuration window* → the media item
-background tint/fill settings
-(`unselitem_tintalpha`, `selitem_tintalpha`, "Media item background fill mode"). Raise them
-if you want the blocks fully coloured. Text typed into a block's item notes in REAPER is
-picked up as that block's lyrics and moved out of the notes.
+The lyrics are stored in the project (in the lyric item's ext state), so the project file
+carries them; only window positions go in `reaper_lyrics.ini` in REAPER's resource folder.
+Projects made with earlier builds (an item per block plus a marker per line) are converted
+to a single lyric item automatically, and their markers removed.
 
 The whole UI is drawn by the extension itself on the subset of Win32 that REAPER's SWELL
 layer provides, so Windows and Linux run the same code. macOS is not supported.
@@ -114,7 +120,7 @@ you run REAPER on.)
 
 ### Tests
 
-The document model (text ↔ items/markers sync) has tests that run against a fake REAPER API:
+The document model (text, the lyric item, sync, sequencer drags) has tests that run against a fake REAPER API:
 
 ```bash
 cmake -S . -B build -DLYRICS_BUILD_TESTS=ON
@@ -125,26 +131,26 @@ build/Release/model_test      # Linux (single-config): build/model_test
 ## Use
 
 1. Right-click the empty track-panel area → **Insert lyric track** (or Track menu / action
-   list). A track named *Lyrics* appears with an empty INTRO block at the edit cursor and the
-   lyric editor opens, ready to type.
-2. Type. Blank line = new block. Each block becomes an item; each line a marker.
-3. Click a label chip to rename/recolour (double-click to rename inline); drag it to reorder.
-4. Tick **Track**, press play, and hit Enter as you sing to lay lines and blocks down live.
-5. **Lyrics panel** opens the playback display; drag it wherever you like.
+   list). A *Lyrics* track appears with its lyric item, and the lyric sequencer opens.
+2. Type. Blank line = new block. Blocks and lines appear in the sequencer lane in colour.
+3. Arrange in the lane: drag blocks, their edges, and the boundaries between lines.
+4. Double-click the lyric item on the timeline any time to reopen the sequencer.
+5. Tick **Track**, press play, and hit Enter as you sing to lay lines and blocks down live.
+6. **Lyrics panel** opens the playback display; drag it wherever you like.
 
 Actions (Actions → Show action list, filter "Lyrics:"): *Insert lyric track*,
-*Show/hide lyric editor*, *Show/hide lyrics panel*, *Toggle editor tracking*.
+*Show/hide lyric sequencer*, *Show/hide lyrics panel*, *Toggle editor tracking*.
 
-Editor keys: the usual — arrows, Home/End, PgUp/PgDn, Shift to select, Ctrl+A/C/X/V,
-Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo.
+Text keys: the usual — arrows, Home/End, PgUp/PgDn, Shift to select, Ctrl+A/C/X/V,
+Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo within the text.
 
 ## Layout
 
 ```
-src/main.cpp        plugin entry, actions, context-menu hook, timer
+src/main.cpp        plugin entry, actions, context-menu hook, item double-click hook, timer
 tests/model_test.cpp  model tests against a fake REAPER API
-src/model.*         lyric document + two-way sync with items/markers
-src/editor.*        editor window: toolbar, label gutter, text area
+src/model.*         lyric document, its storage in the lyric item, sync with REAPER
+src/editor.*        lyric sequencer: toolbar, timeline lane, label gutter, text area
 src/textedit.*      self-drawn text widget (selection, clipboard, undo, scrolling)
 src/panel.*         playback lyrics panel
 src/platform.*      the Win32-vs-SWELL differences (UTF-8 drawing, clipboard, colour picker)

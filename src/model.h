@@ -1,35 +1,32 @@
-// Lyric document model and its two-way sync with REAPER.
+// Lyric document model and its sync with REAPER.
 //
-// Timeline representation:
-//   lyric track  = MediaTrack tagged with P_EXT:LYR=1
-//   block        = empty MediaItem on that track (name = label, colour = block colour,
-//                  lyrics in P_EXT:LYRT so the item itself shows only the label)
-//   line         = project marker (line 0 sits on the item start; markers carry the block colour)
+// Timeline representation (like a MIDI item):
+//   lyric track = MediaTrack tagged with P_EXT:LYR=1
+//   lyric item  = the one empty MediaItem on that track carrying P_EXT:LYRD - the whole lyric
+//                 document (blocks, labels, colours, line timings), with times relative to the
+//                 item start. Moving the item moves the lyrics. The item auto-fits: it starts at
+//                 the first block and never ends before the last block (it may be longer).
+//   Nothing else goes on the main timeline (no project markers): blocks and lines are shown
+//   and edited in the lyric sequencer.
 #pragma once
 #include "api.h"
 #include <string>
 #include <vector>
-#include <map>
-#include <set>
 
 struct LyricLine
 {
   std::string text;
-  double pos = 0;
-  int markerId = -1;
+  double pos = 0;            // absolute project time
 };
 
 struct LyricBlock
 {
-  std::string guid;          // item GUID string
-  MediaItem* item = nullptr;
   std::string label;
   bool customLabel = false;
   int color = 0;             // native|0x1000000
   bool customColor = false;
-  double start = 0, end = 0;
+  double start = 0, end = 0; // absolute project time
   std::vector<LyricLine> lines;
-  bool notesPending = false; // read from item notes (typed in REAPER / older project): move into ext state
 
   std::string Text() const;
   double Len() const { return end - start; }
@@ -48,8 +45,8 @@ class LyricDoc
 public:
   ReaProject* proj = nullptr;
   MediaTrack* track = nullptr;
-  std::string trackGuid;
-  std::vector<LyricBlock> blocks;
+  MediaItem* item = nullptr;            // the lyric item (null until the first block exists)
+  std::vector<LyricBlock> blocks;       // sorted by start, never overlapping
   int lastStateCount = -1;
 
   bool IsBound() const { return proj && track; }
@@ -58,50 +55,64 @@ public:
   bool ValidateTrack();                 // false (and unbinds) if the track/project went away
 
   static bool IsLyricTrack(MediaTrack* t);
+  static bool IsLyricItem(MediaItem* it);
   static void FindLyricTracks(ReaProject* p, std::vector<MediaTrack*>& out);
   static MediaTrack* CreateLyricTrack(ReaProject* p);
   static std::string TrackName(MediaTrack* t);
 
-  // REAPER -> model. Returns true when the editor text needs regenerating
-  // (block/line order changed, text edited in REAPER, blocks added/removed).
+  // REAPER -> model (item moved/trimmed, undo/redo, older projects converted).
+  // Returns true when the editor text needs regenerating.
   bool SyncFromReaper();
   bool NeedsSync() const;
 
-  // Editor text -> model -> REAPER.
+  // Editor text -> model -> REAPER. Text edits get one coalesced undo point (FlushUndo).
   void ApplyText(const std::string& utf8, LiveContext* live);
   std::string ToText() const;
+  void FlushUndo(bool force = false);   // call from a timer: adds the undo point after typing pauses
 
   // structural ops (each creates an undo point)
-  void MoveBlock(int from, int to);
+  void MoveBlock(int from, int to);     // reorder (to = insertion index in the current order)
   void SetLabel(int i, const std::string& label, bool custom);
   void SetColor(int i, int nativeColor, bool custom);
   void DeleteBlock(int i);
   void AppendBlock(double atPos = -1);
 
+  // sequencer drags: apply live without an undo point, then EndDrag(name) adds one
+  void DragBlockTo(int i, double newStart);              // clamped into the free space around it
+  void DragBlockEdge(int i, bool left, double t);        // resize, clamped by neighbours
+  void DragLineStart(int b, int line, double t);         // line > 0, clamped between its neighbours
+  void EndDrag(const char* undoName);
+
   int FindBlockAt(double t, int* lineOut) const;
   double DefaultBlockLen() const;
   double BarLen() const;
+  double MinBlockLen() const { return BarLen() / 4; }
+  double MinLineLen() const { return 0.05; }
   double PlayOrEditPos() const;
   bool IsPlaying() const;
+  double ItemStart() const;
+  double ItemEnd() const;
 
   static std::string AutoLabel(int idx, int count);
   static int DefaultColorForLabel(const std::string& label);
   static const char** PresetLabels(int* count);
 
-private:
-  struct MarkerInfo { double pos; std::string name; int color; };
+  // serialisation (public for tests)
+  static std::string Serialize(const std::vector<LyricBlock>& blocks, double origin);
+  static bool Deserialize(const std::string& s, double origin, std::vector<LyricBlock>& out);
 
-  void ReadMarkers(std::map<int, MarkerInfo>& out) const;
-  bool ReadBlockFromItem(MediaItem* item, LyricBlock& b, const std::map<int, MarkerInfo>& markers, std::set<int>* usedIds);
-  void WriteBlock(LyricBlock& b);
-  void WriteExtState(LyricBlock& b);
-  void DeleteBlockMarkers(LyricBlock& b);
-  void DeleteBlockFromReaper(LyricBlock& b);
+private:
+  MediaItem* FindLyricItem() const;
+  bool MigrateOldItems();               // pre-sequencer projects: one item per block + markers
+  void Write();                         // model -> lyric item (creates it if needed)
   void RelabelAuto();
-  void FixOverlaps();                   // blocks (sorted) never reach past the next block's start
+  void FixOverlaps();
   void NormaliseLines(LyricBlock& b);   // line0 = start, monotonic, inside [start,end]
   void ScaleLines(LyricBlock& b, double oldStart, double oldLen);
-  void FinishWrite();
   void DiffLines(LyricBlock& b, const std::vector<std::string>& newLines, LiveContext* live, const LyricBlock* next);
-  bool BlocksDiffer(const LyricBlock& a, const LyricBlock& b) const;
+  void UndoPoint(const char* name);
+
+  std::string m_written;                // last LYRD value written/read
+  double m_itemPos = 0, m_itemLen = 0;  // item geometry as last written/read
+  bool m_undoPending = false; unsigned long m_lastTextEdit = 0;
 };

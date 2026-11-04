@@ -3,9 +3,16 @@
 #include "util.h"
 #include "resource.h"
 #include <algorithm>
+#include <cmath>
 
 static const int kToolbarH = 38;
 static const int kGutterW = 150;
+// sequencer lane: ruler, block row, line row
+static const int kRulerH = 20, kBlockRowH = 40, kLineRowH = 54, kLanePad = 4;
+static const int kLaneH = kRulerH + kLanePad + kBlockRowH + kLanePad + kLineRowH + kLanePad + 2;
+static const COLORREF kLaneBg = RGB(20, 20, 20);
+static const COLORREF kRulerBg = RGB(34, 34, 34);
+static const COLORREF kItemSpanBg = RGB(28, 30, 34);
 static const COLORREF kBg = RGB(30, 30, 30);
 static const COLORREF kToolbarBg = RGB(38, 38, 38);
 static const COLORREF kGutterBg = RGB(24, 24, 24);
@@ -76,6 +83,7 @@ void LyricEditor::Create()
   m_font = MakeFont(17, false);
   m_fontUi = MakeFont(13, false);
   m_fontChip = MakeFont(12, true);
+  m_fontLane = MakeFont(12, false);
   m_text.SetParent(m_hwnd); m_text.SetFont(m_font);
   m_text.colBg = kBg; m_text.colFg = kText;
   m_text.onChange = [this] { OnEditChanged(); };
@@ -89,7 +97,7 @@ void LyricEditor::Create()
   m_text.SetFocus(true);
 
   RECT r;
-  if (!LoadWindowRect("editor", &r)) { r.left = 200; r.top = 150; r.right = 900; r.bottom = 750; }
+  if (!LoadWindowRect("sequencer", &r)) { r.left = 160; r.top = 120; r.right = 1160; r.bottom = 820; }
   ApplyWindowRect(m_hwnd, r);
   LayoutControls();
   RefreshText();
@@ -101,8 +109,10 @@ void LyricEditor::LayoutControls()
   RECT rc; GetClientRect(m_hwnd, &rc);
   int w = rc.right, h = rc.bottom;
   m_toolbar = { 0, 0, w, kToolbarH };
-  m_gutter = { 0, kToolbarH, kGutterW, h };
-  RECT tr = { kGutterW, kToolbarH, w, h };
+  m_lane = { 0, kToolbarH, w, kToolbarH + kLaneH };
+  int top = (int)m_lane.bottom;
+  m_gutter = { 0, top, kGutterW, h };
+  RECT tr = { kGutterW, top, w, h };
   m_text.SetRect(tr);
   m_buttons.clear();
   m_buttons.push_back({ { 8, 7, 228, kToolbarH - 7 }, "", BTN_TRACKSEL, false });
@@ -127,7 +137,7 @@ void LyricEditor::Show(bool show)
   }
   else if (m_hwnd)
   {
-    SaveWindowRect("editor", m_hwnd);
+    SaveWindowRect("sequencer", m_hwnd);
     ShowWindow(m_hwnd, SW_HIDE);
   }
 }
@@ -138,7 +148,17 @@ void LyricEditor::BindTrack(MediaTrack* t)
   g_doc.Bind(p, t);
   m_curBlock = m_curLine = -1; m_scrolledBlock = -1;
   m_trackName = t ? LyricDoc::TrackName(t) : "";
+  m_needFit = true;
   if (m_hwnd) { RefreshText(); UpdateStatus(); }
+}
+
+void LyricEditor::OpenForTrack(MediaTrack* t)
+{
+  if (!t) return;
+  if (g_doc.track != t || !g_doc.IsBound()) BindTrack(t);
+  m_needFit = true;
+  Show(true);
+  RefreshText();
 }
 
 // ------------------------------------------------------------------ text <-> layout
@@ -229,7 +249,7 @@ void LyricEditor::OnEditChanged()
 void LyricEditor::StartNewBlock()
 {
   if (!m_hwnd || m_renaming || !g_doc.IsBound()) return;
-  if (g_doc.blocks.empty()) { g_doc.AppendBlock(); RefreshText(); }
+  if (g_doc.blocks.empty()) { g_doc.AppendBlock(); m_needFit = true; RefreshText(); }
   else if (!(g_doc.blocks.size() == 1 && g_doc.blocks[0].Text().empty())) OnBeforeNewline();
   m_text.StartParagraphAtEnd();
   m_text.SetFocus(true);
@@ -285,6 +305,13 @@ void LyricEditor::OnTimer()
     Invalidate();
   }
   if (m_tracking && b >= 0 && b != m_scrolledBlock && IsVisible()) { AutoScroll(); m_scrolledBlock = b; }
+  if (m_laneDrag == HIT_NONE) g_doc.FlushUndo(false);   // typing pauses become one undo point
+  if (g_doc.IsBound() && IsVisible())
+  {
+    double t = g_doc.PlayOrEditPos();
+    if (m_tracking && g_doc.IsPlaying()) FollowPlayhead();
+    if (std::fabs(t - m_lastPlayDrawn) > 1e-4) { m_lastPlayDrawn = t; InvalidateRect(m_hwnd, &m_lane, FALSE); }
+  }
   m_text.Tick();
   m_rename.Tick();
   static unsigned long lastStatus = 0;
@@ -322,6 +349,7 @@ void LyricEditor::Paint(HDC dc)
 {
   m_text.Paint(dc);
   PaintGutter(dc);
+  PaintLane(dc);
   PaintToolbar(dc);
   if (m_renaming) m_rename.Paint(dc);
 }
@@ -451,6 +479,319 @@ void LyricEditor::PaintGutter(HDC dc)
   SelectObject(dc, oldFont);
 }
 
+// ------------------------------------------------------------------ sequencer lane
+
+static void FrameRectColor(HDC dc, const RECT& r, COLORREF c, int w)
+{
+  RECT t = { r.left, r.top, r.right, r.top + w }, b = { r.left, r.bottom - w, r.right, r.bottom };
+  RECT l = { r.left, r.top, r.left + w, r.bottom }, rr = { r.right - w, r.top, r.right, r.bottom };
+  FillRectColor(dc, t, c); FillRectColor(dc, b, c); FillRectColor(dc, l, c); FillRectColor(dc, rr, c);
+}
+
+static int LaneBlockTop(const RECT& lane) { return (int)lane.top + kRulerH + kLanePad; }
+static int LaneLineTop(const RECT& lane) { return LaneBlockTop(lane) + kBlockRowH + kLanePad; }
+
+double LyricEditor::XToTime(int x) const { return m_viewStart + (double)(x - m_lane.left) / m_pxPerSec; }
+
+int LyricEditor::TimeToX(double t) const
+{
+  double x = (double)m_lane.left + (t - m_viewStart) * m_pxPerSec;
+  if (x < -100000) x = -100000;
+  if (x > 100000) x = 100000;
+  return (int)std::floor(x + 0.5);
+}
+
+void LyricEditor::FitView()
+{
+  int w = (int)(m_lane.right - m_lane.left);
+  if (w < 80) return;   // not laid out yet: try again on the next paint
+  double a, b;
+  if (g_doc.IsBound() && !g_doc.blocks.empty()) { a = g_doc.ItemStart(); b = g_doc.ItemEnd(); }
+  else { a = g_doc.IsBound() ? GetCursorPositionEx(g_doc.proj) : 0.0; b = a + 30; }
+  double span = std::max(b - a, 4.0);
+  m_pxPerSec = std::max(2.0, (w - 48) / span);
+  m_viewStart = a - 24.0 / m_pxPerSec;
+  m_needFit = false;
+}
+
+void LyricEditor::ZoomAt(int x, double factor)
+{
+  double t = XToTime(x);
+  m_pxPerSec = std::min(4000.0, std::max(1.0, m_pxPerSec * factor));
+  m_viewStart = t - (double)(x - m_lane.left) / m_pxPerSec;
+  Invalidate();
+}
+
+// keep the playhead in view while playing with Track on (page forward like REAPER does)
+void LyricEditor::FollowPlayhead()
+{
+  double t = GetPlayPosition2Ex(g_doc.proj);
+  int x = TimeToX(t), w = (int)(m_lane.right - m_lane.left);
+  if (x < m_lane.left + 10 || x > m_lane.right - 40)
+  {
+    m_viewStart = t - (w * 0.1) / m_pxPerSec;
+    Invalidate();
+  }
+}
+
+void LyricEditor::PaintLane(HDC dc)
+{
+  if (m_needFit) FitView();
+  const RECT& r = m_lane;
+  if (r.right <= r.left) return;
+  FillRectColor(dc, r, kLaneBg);
+  RECT ruler = { r.left, r.top, r.right, r.top + kRulerH };
+  FillRectColor(dc, ruler, kRulerBg);
+  int by0 = LaneBlockTop(r), by1 = by0 + kBlockRowH, ly0 = LaneLineTop(r), ly1 = ly0 + kLineRowH;
+  HGDIOBJ oldFont = SelectObject(dc, m_fontLane);
+  SetBkMode(dc, TRANSPARENT);
+  RECT border = { r.left, r.bottom - 2, r.right, r.bottom };
+  FillRectColor(dc, border, RGB(52, 52, 52));
+  if (!g_doc.IsBound())
+  {
+    SetTextColor(dc, kDim);
+    RECT tr = { r.left + 12, by0, r.right - 12, ly1 };
+    DrawTextU8(dc, "No lyric track", &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(dc, oldFont);
+    return;
+  }
+  ReaProject* proj = g_doc.proj;
+
+  // the lyric item's extent
+  if (!g_doc.blocks.empty())
+  {
+    RECT sp = { std::max((int)r.left, TimeToX(g_doc.ItemStart())), by0 - 2, std::min((int)r.right, TimeToX(g_doc.ItemEnd())), ly1 + 2 };
+    if (sp.right > sp.left) FillRectColor(dc, sp, kItemSpanBg);
+  }
+
+  // bars: ruler ticks + numbers, faint grid lines through the rows
+  {
+    int meas = 0;
+    TimeMap2_timeToBeats(proj, std::max(0.0, m_viewStart), &meas, nullptr, nullptr, nullptr);
+    double barPx = g_doc.BarLen() * m_pxPerSec;
+    int step = 1;
+    while (step * barPx < 48 && step < 4096) step *= 2;
+    meas -= meas % step;
+    SetTextColor(dc, RGB(150, 150, 150));
+    for (int m = std::max(0, meas), guard = 0; guard < 2000; m += step, guard++)
+    {
+      int mm = m;
+      int x = TimeToX(TimeMap2_beatsToTime(proj, 0, &mm));
+      if (x > r.right) break;
+      if (x < r.left) continue;
+      RECT tick = { x, ruler.top + 9, x + 1, ruler.bottom }; FillRectColor(dc, tick, RGB(105, 105, 105));
+      RECT grid = { x, by0 - 2, x + 1, ly1 + 2 }; FillRectColor(dc, grid, RGB(38, 38, 40));
+      RECT tr = { x + 3, ruler.top, x + 60, ruler.bottom };
+      DrawTextU8(dc, FormatStr("%d", m + 1), &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+  }
+
+  int cb = -1, cl = 0, cc = 0;
+  CaretInfo(&cb, &cl, &cc);
+  const auto& blocks = g_doc.blocks;
+  if (blocks.empty())
+  {
+    SetTextColor(dc, kDim);
+    RECT tr = { r.left + 12, by0, r.right - 12, by1 };
+    DrawTextU8(dc, "Type lyrics below (or press + Block) to create the lyric item.", &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+  }
+  for (size_t i = 0; i < blocks.size(); i++)
+  {
+    const LyricBlock& b = blocks[i];
+    int x0 = TimeToX(b.start), x1 = TimeToX(b.end);
+    if (x1 < r.left || x0 > r.right) continue;
+    COLORREF c = NativeToColorref(b.color);
+    bool light = IsLightColor(c);
+    RECT br = { std::max(x0, (int)r.left), by0, std::min(x1 - 1, (int)r.right), by1 };
+    if (br.right > br.left) RoundRectColor(dc, br, c, 6);
+    if ((int)i == cb && br.right > br.left) FrameRectColor(dc, br, RGB(255, 255, 255), 2);
+    SetTextColor(dc, light ? RGB(20, 20, 20) : RGB(250, 250, 250));
+    SelectObject(dc, m_fontChip);
+    RECT tr = { br.left + 7, by0, br.right - 4, by1 };
+    if (tr.right > tr.left + 6) DrawTextU8(dc, b.label, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    SelectObject(dc, m_fontLane);
+
+    for (size_t li = 0; li < b.lines.size(); li++)
+    {
+      double ls = b.lines[li].pos, le = li + 1 < b.lines.size() ? b.lines[li + 1].pos : b.end;
+      int lx0 = TimeToX(ls), lx1 = TimeToX(le);
+      if (lx1 < r.left || lx0 > r.right) continue;
+      bool now = (int)i == m_curBlock && (int)li == m_curLine;
+      COLORREF lc = (li % 2) ? Blend(c, RGB(0, 0, 0), 0.2) : c;
+      if (now) lc = Blend(c, RGB(255, 255, 255), 0.4);
+      RECT lr = { std::max(lx0, (int)r.left), ly0, std::min(lx1 - 1, (int)r.right), ly1 };
+      if (lr.right <= lr.left) continue;
+      FillRectColor(dc, lr, lc);
+      if ((int)i == cb && (int)li == cl) { RECT u = { lr.left, ly1 - 3, lr.right, ly1 }; FillRectColor(dc, u, RGB(255, 255, 255)); }
+      if (li > 0 && lx0 >= r.left) { RECT hnd = { lx0, ly0, lx0 + 2, ly1 }; FillRectColor(dc, hnd, Blend(c, RGB(255, 255, 255), 0.7)); }
+      SetTextColor(dc, IsLightColor(lc) ? RGB(20, 20, 20) : RGB(245, 245, 245));
+      RECT ttr = { lr.left + 5, ly0 + 3, lr.right - 3, ly1 - 4 };
+      if (ttr.right > ttr.left + 6 && !b.lines[li].text.empty())
+        DrawTextU8(dc, b.lines[li].text, &ttr, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+    }
+  }
+
+  // reorder drop marker while dragging a block past its neighbours
+  if (m_laneDrag == HIT_BLOCK && m_laneDrop >= 0 && !blocks.empty())
+  {
+    double t = m_laneDrop < (int)blocks.size() ? blocks[m_laneDrop].start : blocks.back().end;
+    int x = TimeToX(t);
+    RECT mk = { x - 2, by0 - 3, x + 2, ly1 + 3 };
+    FillRectColor(dc, mk, RGB(255, 255, 255));
+  }
+
+  // edit cursor and playhead
+  int ex = TimeToX(GetCursorPositionEx(proj));
+  if (ex >= r.left && ex < r.right) { RECT e = { ex, r.top, ex + 1, ly1 + 2 }; FillRectColor(dc, e, RGB(175, 175, 175)); }
+  if (g_doc.IsPlaying())
+  {
+    int px = TimeToX(GetPlayPosition2Ex(proj));
+    if (px >= r.left && px < r.right)
+    {
+      RECT p = { px - 1, r.top, px + 1, ly1 + 2 }; FillRectColor(dc, p, RGB(255, 255, 255));
+      POINT tri[3] = { { px - 6, (int)r.top }, { px + 6, (int)r.top }, { px, (int)r.top + 8 } };
+      HBRUSH tb = CreateSolidBrush(RGB(255, 255, 255));
+      HGDIOBJ ob = SelectObject(dc, tb); HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
+      Polygon(dc, tri, 3);
+      SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(tb);
+    }
+  }
+  SelectObject(dc, oldFont);
+}
+
+LyricEditor::LaneHitKind LyricEditor::LaneHit(int x, int y, int* block, int* line) const
+{
+  *block = -1; *line = -1;
+  if (x < m_lane.left || x >= m_lane.right || y < m_lane.top || y >= m_lane.bottom) return HIT_NONE;
+  if (y < m_lane.top + kRulerH) return HIT_RULER;
+  if (!g_doc.IsBound()) return HIT_EMPTY;
+  int by0 = LaneBlockTop(m_lane), by1 = by0 + kBlockRowH, ly0 = LaneLineTop(m_lane), ly1 = ly0 + kLineRowH;
+  bool inBlocks = y >= by0 - 2 && y < by1 + 2, inLines = y >= ly0 - 2 && y < ly1 + 2;
+  if (!inBlocks && !inLines) return HIT_EMPTY;
+  const auto& blocks = g_doc.blocks;
+  for (int i = 0; i < (int)blocks.size(); i++)
+  {
+    const LyricBlock& b = blocks[i];
+    int x0 = TimeToX(b.start), x1 = TimeToX(b.end);
+    if (x >= x1 - 5 && x <= x1 + 1) { *block = i; return HIT_BLOCK_RIGHT; }
+    if (x >= x0 - 1 && x <= x0 + 5 && x < x1) { *block = i; return HIT_BLOCK_LEFT; }
+    if (x < x0 || x >= x1) continue;
+    *block = i;
+    if (inBlocks) return HIT_BLOCK;
+    for (int li = 1; li < (int)b.lines.size(); li++)
+      if (std::abs(x - TimeToX(b.lines[li].pos)) <= 4) { *line = li; return HIT_LINE_EDGE; }
+    for (int li = (int)b.lines.size() - 1; li >= 0; li--)
+      if (x >= TimeToX(b.lines[li].pos)) { *line = li; return HIT_LINE; }
+    *line = 0;
+    return HIT_LINE;
+  }
+  return HIT_EMPTY;
+}
+
+// Dropping a block with the pointer past a neighbour's middle reorders the blocks;
+// otherwise it just moves within the free space around it.
+int LyricEditor::ReorderTarget(int block, double t) const
+{
+  const auto& blocks = g_doc.blocks;
+  int k = 0;
+  for (int i = 0; i < (int)blocks.size(); i++)
+    if (i != block && (blocks[i].start + blocks[i].end) / 2 < t) k++;
+  if (k == block) return -1;
+  return k > block ? k + 1 : k;
+}
+
+void LyricEditor::FocusBlockInText(int block, int line)
+{
+  if (block < 0 || block >= (int)m_layout.size()) return;
+  int ln = std::min(m_layout[block].first + std::max(0, line), m_layout[block].last);
+  m_text.SetCaret({ ln, 0 });
+  m_text.EnsureCaretVisible();
+  m_text.SetFocus(true);
+  Invalidate();
+}
+
+bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
+{
+  (void)wp;
+  int b = -1, l = -1;
+  switch (msg)
+  {
+  case WM_LBUTTONDOWN:
+  {
+    LaneHitKind k = LaneHit(x, y, &b, &l);
+    if (k == HIT_NONE) return false;
+    SetFocus(m_hwnd);
+    if (m_renaming) CommitRename(true);
+    if (!g_doc.IsBound()) return true;
+    g_doc.FlushUndo(true);
+    m_laneDown = { x, y }; m_laneMoved = false; m_laneBlock = b; m_laneLine = l; m_laneDrop = -1;
+    if (k == HIT_RULER || k == HIT_EMPTY)
+    {
+      m_laneDrag = HIT_RULER;
+      SetEditCurPos2(g_doc.proj, std::max(0.0, XToTime(x)), false, true);
+    }
+    else
+    {
+      m_laneDrag = k;
+      if (k == HIT_BLOCK) m_laneGrab = XToTime(x) - g_doc.blocks[b].start;
+    }
+    SetCapture(m_hwnd);
+    Invalidate();
+    return true;
+  }
+  case WM_MOUSEMOVE:
+  {
+    if (m_laneDrag == HIT_NONE) return false;
+    if (!m_laneMoved && std::abs(x - m_laneDown.x) < 3) return true;
+    m_laneMoved = true;
+    double t = XToTime(x);
+    switch (m_laneDrag)
+    {
+    case HIT_RULER: SetEditCurPos2(g_doc.proj, std::max(0.0, t), false, true); break;
+    case HIT_BLOCK: g_doc.DragBlockTo(m_laneBlock, t - m_laneGrab); m_laneDrop = ReorderTarget(m_laneBlock, t); break;
+    case HIT_BLOCK_LEFT: g_doc.DragBlockEdge(m_laneBlock, true, t); break;
+    case HIT_BLOCK_RIGHT: g_doc.DragBlockEdge(m_laneBlock, false, t); break;
+    case HIT_LINE_EDGE: g_doc.DragLineStart(m_laneBlock, m_laneLine, t); break;
+    default: break;
+    }
+    Invalidate();
+    return true;
+  }
+  case WM_LBUTTONUP:
+  {
+    if (m_laneDrag == HIT_NONE) return false;
+    LaneHitKind k = m_laneDrag;
+    m_laneDrag = HIT_NONE;
+    if (GetCapture() == m_hwnd) ReleaseCapture();
+    int drop = m_laneDrop; m_laneDrop = -1;
+    if (k == HIT_RULER) {}
+    else if (!m_laneMoved) FocusBlockInText(m_laneBlock, k == HIT_LINE || k == HIT_LINE_EDGE ? m_laneLine : 0);
+    else if (k == HIT_BLOCK && drop >= 0) { g_doc.MoveBlock(m_laneBlock, drop); RefreshText(); }
+    else if (k == HIT_BLOCK) g_doc.EndDrag("Lyrics: move block");
+    else if (k == HIT_LINE_EDGE) g_doc.EndDrag("Lyrics: move line");
+    else if (k == HIT_BLOCK_LEFT || k == HIT_BLOCK_RIGHT) g_doc.EndDrag("Lyrics: resize block");
+    Invalidate();
+    return true;
+  }
+  case WM_LBUTTONDBLCLK:
+  {
+    LaneHitKind k = LaneHit(x, y, &b, &l);
+    if (k == HIT_NONE) return false;
+    if (k == HIT_BLOCK && b >= 0) { FocusBlockInText(b, 0); BeginRename(b); }
+    else if (k == HIT_LINE && b >= 0) FocusBlockInText(b, l);
+    return true;
+  }
+  case WM_RBUTTONUP:
+  {
+    LaneHitKind k = LaneHit(x, y, &b, &l);
+    if (k == HIT_NONE) return false;
+    if (b >= 0) { POINT pt = { x, y }; ClientToScreen(m_hwnd, &pt); ShowBlockMenu(b, pt); }
+    return true;
+  }
+  }
+  return false;
+}
+
 // ------------------------------------------------------------------ hit testing
 
 int LyricEditor::BlockAtY(int y)
@@ -518,7 +859,7 @@ void LyricEditor::ShowTrackMenu(POINT pt)
   else if (cmd == MENU_TRACK - 1 && p)
   {
     MediaTrack* t = LyricDoc::CreateLyricTrack(p);
-    if (t) { BindTrack(t); RefreshText(); StartNewBlock(); }
+    if (t) { BindTrack(t); g_doc.AppendBlock(); m_needFit = true; RefreshText(); StartNewBlock(); }
   }
   Invalidate();
 }
@@ -606,11 +947,11 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_SIZE:
     LayoutControls();
 #ifndef _WIN32
-    SaveWindowRect("editor", h);
+    SaveWindowRect("sequencer", h);
 #endif
     return 0;
 #ifdef _WIN32
-  case WM_GETMINMAXINFO: { MINMAXINFO* mi = (MINMAXINFO*)lp; mi->ptMinTrackSize.x = 560; mi->ptMinTrackSize.y = 240; return 0; }
+  case WM_GETMINMAXINFO: { MINMAXINFO* mi = (MINMAXINFO*)lp; mi->ptMinTrackSize.x = 640; mi->ptMinTrackSize.y = 420; return 0; }
   case WM_ERASEBKGND: SetWindowLongPtr(h, DWLP_MSGRESULT, 1); return 1;
   // the dialog manager otherwise treats typed characters as mnemonics and drops them
   case WM_GETDLGCODE: SetWindowLongPtr(h, DWLP_MSGRESULT, DLGC_WANTALLKEYS | DLGC_WANTCHARS | DLGC_WANTARROWS | DLGC_WANTTAB); return 1;
@@ -636,7 +977,12 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_SETCURSOR:
   {
     POINT pt; GetCursorPos(&pt); ScreenToClient(h, &pt);
-    if (m_text.HitTest(pt.x, pt.y) && pt.x < m_text.Rect().right - 10) SetCursor(LoadCursor(nullptr, IDC_IBEAM));
+    int hb, hl;
+    LaneHitKind lk = m_laneDrag != HIT_NONE ? m_laneDrag : LaneHit(pt.x, pt.y, &hb, &hl);
+    if (lk == HIT_BLOCK_LEFT || lk == HIT_BLOCK_RIGHT || lk == HIT_LINE_EDGE) SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+    else if (lk == HIT_BLOCK) SetCursor(LoadCursor(nullptr, IDC_SIZEALL));
+    else if (lk != HIT_NONE) SetCursor(LoadCursor(nullptr, IDC_ARROW));
+    else if (m_text.HitTest(pt.x, pt.y) && pt.x < m_text.Rect().right - 10) SetCursor(LoadCursor(nullptr, IDC_IBEAM));
     else if (m_dragging) SetCursor(LoadCursor(nullptr, IDC_SIZENS));
     else SetCursor(LoadCursor(nullptr, IDC_ARROW));
 #ifdef _WIN32
@@ -647,6 +993,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_LBUTTONDOWN:
   {
     int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+    if (OnLaneMouse(msg, wp, x, y)) return 1;
     SetFocus(h);
     if (m_renaming)
     {
@@ -672,6 +1019,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_LBUTTONDBLCLK:
   {
     int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+    if (OnLaneMouse(msg, wp, x, y)) return 1;
     if (m_text.HitTest(x, y)) { m_text.OnMouse(msg, wp, x, y); Invalidate(); return 1; }
     if (x < m_gutter.right && y >= m_gutter.top)
     {
@@ -684,6 +1032,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_MOUSEMOVE:
   {
     int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+    if (m_laneDrag != HIT_NONE) { OnLaneMouse(msg, wp, x, y); return 1; }
     if (m_textCapture) { if (m_text.OnMouse(msg, wp, x, y)) Invalidate(); return 1; }
     if (m_dragBlock >= 0 && GetCapture() == h)
     {
@@ -696,6 +1045,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_LBUTTONUP:
   {
     int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+    if (m_laneDrag != HIT_NONE) { OnLaneMouse(msg, wp, x, y); return 1; }
     if (GetCapture() == h) ReleaseCapture();
     if (m_textCapture) { m_textCapture = false; m_text.OnMouse(msg, wp, x, y); Invalidate(); return 1; }
     int block = m_dragBlock; m_dragBlock = -1;
@@ -718,6 +1068,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_RBUTTONUP:
   {
     int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+    if (OnLaneMouse(msg, wp, x, y)) return 1;
     if (x < m_gutter.right && y >= m_gutter.top)
     {
       int b = BlockAtY(y);
@@ -729,6 +1080,15 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_MOUSEWHEEL:
   {
     int delta = (short)HIWORD(wp);
+    POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };   // screen coordinates
+    ScreenToClient(h, &pt);
+    if (pt.x >= m_lane.left && pt.x < m_lane.right && pt.y >= m_lane.top && pt.y < m_lane.bottom)
+    {
+      // lane: wheel scrolls in time, Ctrl+wheel zooms around the pointer
+      if (CtrlDown()) ZoomAt(pt.x, std::pow(1.25, delta / 120.0));
+      else { m_viewStart -= (delta / 120.0) * 80.0 / m_pxPerSec; Invalidate(); }
+      return 1;
+    }
     m_text.OnWheel(delta);
     Invalidate();
     return 1;
@@ -744,15 +1104,16 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   case WM_KILLFOCUS: m_text.SetFocus(false); if (m_renaming) CommitRename(true); Invalidate(); return 0;
   case WM_CLOSE: Show(false); return 1;
 #ifdef _WIN32
-  case WM_EXITSIZEMOVE: SaveWindowRect("editor", h); return 0;
+  case WM_EXITSIZEMOVE: SaveWindowRect("sequencer", h); return 0;
 #else
-  case WM_MOVE: SaveWindowRect("editor", h); return 0;
+  case WM_MOVE: SaveWindowRect("sequencer", h); return 0;
 #endif
   case WM_DESTROY:
     m_hwnd = nullptr;
     if (m_font) { DeleteObject(m_font); m_font = nullptr; }
     if (m_fontUi) { DeleteObject(m_fontUi); m_fontUi = nullptr; }
     if (m_fontChip) { DeleteObject(m_fontChip); m_fontChip = nullptr; }
+    if (m_fontLane) { DeleteObject(m_fontLane); m_fontLane = nullptr; }
     return 0;
   }
   return 0;

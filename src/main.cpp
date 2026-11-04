@@ -20,9 +20,8 @@ static void InsertLyricTrack()
   MediaTrack* t = LyricDoc::CreateLyricTrack(p);
   if (!t) return;
   LyricEditor::Get().BindTrack(t);
-  g_doc.AppendBlock();                 // the first block exists from the start, with no text
-  LyricEditor::Get().Show(true);
-  LyricEditor::Get().RefreshText();
+  g_doc.AppendBlock();                 // the lyric item + its first block (empty, no text)
+  LyricEditor::Get().OpenForTrack(t);
   LyricEditor::Get().StartNewBlock();
 }
 
@@ -102,8 +101,86 @@ static int TranslateAccel(MSG* msg, accelerator_register_t*)
 
 static accelerator_register_t g_accelHook = { TranslateAccel, true, nullptr };
 
+// ------------------------------------------------------------------ double-click a lyric item
+// REAPER has no per-item double-click hook, so the arrange view's window procedure is
+// subclassed: a double-click on a lyric item opens the sequencer and is not passed on;
+// everything else goes to REAPER untouched.
+
+static HWND g_arrange = nullptr;
+static WNDPROC g_arrangeOldProc = nullptr;
+static DWORD g_lastDownTick = 0;
+static POINT g_lastDownPt = { 0, 0 };
+static bool g_swallowUp = false;
+
+static DWORD DoubleClickMs()
+{
+#ifdef _WIN32
+  return GetDoubleClickTime();
+#else
+  return 400;
+#endif
+}
+
+static LRESULT CALLBACK ArrangeProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+  if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
+  {
+    POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+    bool dbl = msg == WM_LBUTTONDBLCLK;
+    DWORD now = GetTickCount();
+    if (!dbl) dbl = now - g_lastDownTick <= DoubleClickMs() && abs(pt.x - g_lastDownPt.x) <= 4 && abs(pt.y - g_lastDownPt.y) <= 4;
+    g_lastDownTick = dbl ? 0 : now;
+    g_lastDownPt = pt;
+    if (dbl && !ShiftDown() && !CtrlDown())
+    {
+      POINT sp = pt; ClientToScreen(h, &sp);
+      MediaItem* it = GetItemFromPoint(sp.x, sp.y, true, nullptr);
+      if (it && LyricDoc::IsLyricItem(it))
+      {
+        g_swallowUp = true;
+        LyricEditor::Get().OpenForTrack(GetMediaItem_Track(it));
+        return 0;
+      }
+    }
+  }
+  else if (msg == WM_LBUTTONUP && g_swallowUp) { g_swallowUp = false; return 0; }
+#ifdef _WIN32
+  return CallWindowProcW(g_arrangeOldProc, h, msg, wp, lp);
+#else
+  return CallWindowProc(g_arrangeOldProc, h, msg, wp, lp);
+#endif
+}
+
+static void HookArrange()
+{
+  if (g_arrange || !g_mainHwnd) return;
+  HWND a = GetDlgItem(g_mainHwnd, 1000);   // REAPER's arrange view ("trackview")
+  if (!a) return;
+  g_arrange = a;
+#ifdef _WIN32
+  g_arrangeOldProc = (WNDPROC)SetWindowLongPtrW(a, GWLP_WNDPROC, (LONG_PTR)ArrangeProc);
+#else
+  g_arrangeOldProc = (WNDPROC)SetWindowLong(a, GWL_WNDPROC, (LONG_PTR)ArrangeProc);
+#endif
+  if (!g_arrangeOldProc) g_arrange = nullptr;
+}
+
+static void UnhookArrange()
+{
+  if (!g_arrange || !g_arrangeOldProc) return;
+#ifdef _WIN32
+  if ((WNDPROC)GetWindowLongPtrW(g_arrange, GWLP_WNDPROC) == ArrangeProc)
+    SetWindowLongPtrW(g_arrange, GWLP_WNDPROC, (LONG_PTR)g_arrangeOldProc);
+#else
+  if ((WNDPROC)GetWindowLong(g_arrange, GWL_WNDPROC) == ArrangeProc)
+    SetWindowLong(g_arrange, GWL_WNDPROC, (LONG_PTR)g_arrangeOldProc);
+#endif
+  g_arrange = nullptr; g_arrangeOldProc = nullptr;
+}
+
 static void TimerFn()
 {
+  HookArrange();   // the arrange view may not exist yet when the plugin loads
   LyricEditor::Get().OnTimer();
   LyricsPanel::Get().OnTimer();
 }
@@ -129,6 +206,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
       plugin_register("-toggleaction", (void*)ToggleAction);
       plugin_register("-accelerator", (void*)&g_accelHook);
     }
+    UnhookArrange();
     return 0;
   }
   if (rec->caller_version != REAPER_PLUGIN_VERSION || !rec->GetFunc) return 0;
@@ -138,7 +216,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   g_mainHwnd = rec->hwnd_main;
 
   RegisterAction(rec, 0, "LYRICS_INSERT_TRACK", "Lyrics: Insert lyric track", &g_cmdInsert);
-  RegisterAction(rec, 1, "LYRICS_TOGGLE_EDITOR", "Lyrics: Show/hide lyric editor", &g_cmdEditor);
+  RegisterAction(rec, 1, "LYRICS_TOGGLE_EDITOR", "Lyrics: Show/hide lyric sequencer", &g_cmdEditor);
   RegisterAction(rec, 2, "LYRICS_TOGGLE_PANEL", "Lyrics: Show/hide lyrics panel", &g_cmdPanel);
   RegisterAction(rec, 3, "LYRICS_TOGGLE_TRACKING", "Lyrics: Toggle editor tracking (follow playback)", &g_cmdTracking);
 

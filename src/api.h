@@ -39,18 +39,19 @@
 #define REAPERAPI_WANT_GetSetMediaItemInfo_String
 #define REAPERAPI_WANT_GetMediaItemInfo_Value
 #define REAPERAPI_WANT_SetMediaItemInfo_Value
-// markers
-#define REAPERAPI_WANT_AddProjectMarker2
-#define REAPERAPI_WANT_SetProjectMarker4
+#define REAPERAPI_WANT_GetMediaItem_Track
+#define REAPERAPI_WANT_GetItemFromPoint
+#define REAPERAPI_WANT_Undo_OnStateChange_Item
+// markers: only to remove the ones older builds created
 #define REAPERAPI_WANT_DeleteProjectMarker
 #define REAPERAPI_WANT_EnumProjectMarkers3
-#define REAPERAPI_WANT_CountProjectMarkers
 // transport / time
 #define REAPERAPI_WANT_GetPlayPosition2Ex
 #define REAPERAPI_WANT_GetPlayStateEx
 #define REAPERAPI_WANT_GetCursorPositionEx
 #define REAPERAPI_WANT_SetEditCurPos2
 #define REAPERAPI_WANT_TimeMap2_beatsToTime
+#define REAPERAPI_WANT_TimeMap2_timeToBeats
 #define REAPERAPI_WANT_format_timestr_pos
 // colour
 #define REAPERAPI_WANT_ColorToNative
