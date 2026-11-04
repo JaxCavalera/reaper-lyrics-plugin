@@ -59,14 +59,24 @@ static int FitFontSize(HDC dc, const std::string& text, int wantPx, int maxW, bo
   return px;
 }
 
-static void DrawLine(HDC dc, const std::string& text, int y, int w, int px, COLORREF col, bool bold)
+// The full height of a line in this font, descenders included.
+static int LineHeightFor(HDC dc, int px, bool bold)
+{
+  HFONT f = MakeFont(px, bold); HGDIOBJ o = SelectObject(dc, f);
+  int lh = FontLineHeight(dc);
+  SelectObject(dc, o); DeleteObject(f);
+  return std::max(lh, px);
+}
+
+// Draws one line centred in a row of height rowH starting at y (the font shrinks to fit the width).
+static void DrawLine(HDC dc, const std::string& text, int y, int rowH, int w, int px, COLORREF col, bool bold)
 {
   if (text.empty()) return;
   px = FitFontSize(dc, text, px, w - 40, bold);
   HFONT f = MakeFont(px, bold); HGDIOBJ o = SelectObject(dc, f);
   SetTextColor(dc, col);
-  RECT r = { 20, y, w - 20, y + px + 8 };
-  DrawTextU8(dc, text, &r, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+  RECT r = { 20, y, w - 20, y + rowH };
+  DrawTextU8(dc, text, &r, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | DT_NOCLIP);
   SelectObject(dc, o); DeleteObject(f);
 }
 
@@ -106,27 +116,48 @@ void LyricsPanel::Paint(HDC dc, RECT rc)
     SelectObject(dc, o); DeleteObject(f);
   }
 
-  int big = std::max(20, std::min(84, h / 5));
-  int med = std::max(14, (int)(big * 0.5));
-  int cy = (int)(h * 0.47);
+  PanelRowLayout L = LayoutPanelRows(dc, w, h);
+  std::string text[4];
+  COLORREF col[4] = { RGB(120, 120, 120), RGB(255, 255, 255), RGB(170, 170, 170), RGB(120, 120, 120) };
   if (blk)
   {
     int li = std::max(0, m_curLine);
-    std::string curL = li < (int)blk->lines.size() ? blk->lines[li].text : "";
-    std::string prevL = li > 0 ? blk->lines[li - 1].text : "";
-    std::string next1 = li + 1 < (int)blk->lines.size() ? blk->lines[li + 1].text : "";
-    std::string next2 = li + 2 < (int)blk->lines.size() ? blk->lines[li + 2].text : "";
-    if (next1.empty() && m_curBlock + 1 < (int)g_doc.blocks.size() && !g_doc.blocks[m_curBlock + 1].lines.empty())
-      next1 = "\xe2\x86\x92 " + g_doc.blocks[m_curBlock + 1].lines[0].text;
-    DrawLine(dc, prevL, cy - big / 2 - med - 14, w, med, RGB(120, 120, 120), false);
-    DrawLine(dc, curL, cy - big / 2 - 4, w, big, RGB(255, 255, 255), true);
-    DrawLine(dc, next1, cy + big / 2 + 10, w, med, RGB(170, 170, 170), false);
-    DrawLine(dc, next2, cy + big / 2 + 10 + med + 10, w, med, RGB(120, 120, 120), false);
+    text[1] = li < (int)blk->lines.size() ? blk->lines[li].text : "";
+    text[0] = li > 0 ? blk->lines[li - 1].text : "";
+    text[2] = li + 1 < (int)blk->lines.size() ? blk->lines[li + 1].text : "";
+    text[3] = li + 2 < (int)blk->lines.size() ? blk->lines[li + 2].text : "";
+    if (text[2].empty() && m_curBlock + 1 < (int)g_doc.blocks.size() && !g_doc.blocks[m_curBlock + 1].lines.empty())
+      text[2] = "\xe2\x86\x92 " + g_doc.blocks[m_curBlock + 1].lines[0].text;
   }
-  else if (upcoming && !upcoming->lines.empty())
-    DrawLine(dc, upcoming->lines[0].text, cy - big / 2 - 4, w, big, RGB(130, 130, 130), true);
-  else if (g_doc.IsBound())
-    DrawLine(dc, "\xe2\x80\x94", cy - big / 2 - 4, w, big, RGB(90, 90, 90), true);
+  else if (upcoming && !upcoming->lines.empty()) { text[1] = upcoming->lines[0].text; col[1] = RGB(130, 130, 130); }
+  else if (g_doc.IsBound()) { text[1] = "\xe2\x80\x94"; col[1] = RGB(90, 90, 90); }
+  DrawPanelRows(dc, w, L, text, col);
+}
+
+// Rows sized from the fonts' real line heights (so descenders are never cut off by the row
+// below), with a gap between them; everything shrinks until the four rows fit the window.
+PanelRowLayout LayoutPanelRows(HDC dc, int w, int h)
+{
+  (void)w;
+  PanelRowLayout L;
+  const int top = 44, bottom = h - 6;   // below the label chip
+  L.big = std::max(20, std::min(84, h / 5));
+  for (;;)
+  {
+    L.med = std::max(14, (int)(L.big * 0.5));
+    L.hBig = LineHeightFor(dc, L.big, true);
+    L.hMed = LineHeightFor(dc, L.med, false);
+    L.gap = std::max(6, L.hMed / 3);
+    if (PanelRows((int)(h * 0.47), top, bottom, L.hMed, L.hBig, L.gap, L.tops) || L.big <= 20) break;
+    L.big = std::max(20, (int)(L.big * 0.9));
+  }
+  return L;
+}
+
+void DrawPanelRows(HDC dc, int w, const PanelRowLayout& L, const std::string text[4], const COLORREF col[4])
+{
+  for (int i = 0; i < 4; i++)
+    DrawLine(dc, text[i], L.tops[i], L.RowH(i), w, i == 1 ? L.big : L.med, col[i], i == 1);
 }
 
 INT_PTR LyricsPanel::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)

@@ -96,6 +96,11 @@ struct ClickCounter
   void SetDouble(unsigned long now, int px, int py) { tick = now; x = px; y = py; count = 2; }
 };
 
+// Lyrics panel rows: previous line, current line (centred on centreY), next two lines. Heights
+// are real font line heights (descenders included); gap goes between rows. The rows are kept
+// within [minTop, maxBottom]. Writes the top of each row to tops[4]; false if they can't fit.
+bool PanelRows(int centreY, int minTop, int maxBottom, int hSmall, int hBig, int gap, int tops[4]);
+
 // The project file remembers which lyric windows were open:
 //   LYRICS_WINDOWS <sequencer 0/1> <lyrics panel 0/1> [<track GUID the sequencer showed>]
 struct WindowState { bool sequencer = false, panel = false; std::string trackGuid; };

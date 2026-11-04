@@ -260,6 +260,20 @@ double WheelZoomFactor(int wheelDelta)
   return down ? 1.0 / f : f;
 }
 
+bool PanelRows(int centreY, int minTop, int maxBottom, int hSmall, int hBig, int gap, int tops[4])
+{
+  int total = hSmall + gap + hBig + gap + hSmall + gap + hSmall;
+  int cur = centreY - hBig / 2;
+  int first = cur - gap - hSmall;
+  if (first < minTop) { cur += minTop - first; first = minTop; }               // push down
+  if (first + total > maxBottom) { int d = first + total - maxBottom; cur -= d; first -= d; }   // pull up
+  tops[0] = first;
+  tops[1] = cur;
+  tops[2] = cur + hBig + gap;
+  tops[3] = tops[2] + hSmall + gap;
+  return total <= maxBottom - minTop;
+}
+
 std::string FormatWindowState(const WindowState& s)
 {
   std::string l = FormatStr("LYRICS_WINDOWS %d %d", s.sequencer ? 1 : 0, s.panel ? 1 : 0);

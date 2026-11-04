@@ -5,6 +5,7 @@
 #include "model.h"
 #include "trackstyle.h"
 #include "textedit.h"
+#include "panel.h"
 #include "util.h"
 #include <algorithm>
 #include <cmath>
@@ -16,6 +17,49 @@
 #include <vector>
 
 HINSTANCE g_hInst = nullptr;   // main.cpp's, needed by platform.cpp (not used by the tests)
+HWND g_mainHwnd = nullptr;     // main.cpp's, needed by panel.cpp
+
+#ifdef _WIN32
+// Draws the lyrics panel's rows with real fonts into a bitmap. ink[i] = first/last pixel row
+// that row i's text actually covers (descenders included), measured row by row.
+struct PanelInk { int top = -1, bottom = -1; };
+static void RenderPanelRows(int w, int h, const std::string text[4], PanelRowLayout* L, PanelInk ink[4], const char* saveBmp)
+{
+  HDC screen = GetDC(nullptr);
+  HDC dc = CreateCompatibleDC(screen);
+  BITMAPINFO bi = {}; bi.bmiHeader.biSize = sizeof(bi.bmiHeader); bi.bmiHeader.biWidth = w; bi.bmiHeader.biHeight = -h;
+  bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr;
+  HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+  HGDIOBJ old = SelectObject(dc, bmp);
+  SetBkMode(dc, TRANSPARENT);
+  *L = LayoutPanelRows(dc, w, h);
+  COLORREF col[4] = { RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255) };
+  RECT all = { 0, 0, w, h };
+  for (int i = 0; i < 4; i++)
+  {
+    FillRect(dc, &all, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    std::string one[4]; one[i] = text[i];
+    DrawPanelRows(dc, w, *L, one, col);
+    GdiFlush();
+    const unsigned* px = (const unsigned*)bits;
+    for (int y = 0; y < h; y++)
+      for (int x = 0; x < w; x++)
+        if (px[y * w + x] & 0xffffff) { if (ink[i].top < 0) ink[i].top = y; ink[i].bottom = y; break; }
+  }
+  if (saveBmp)
+  {
+    FillRect(dc, &all, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    COLORREF real[4] = { RGB(120, 120, 120), RGB(255, 255, 255), RGB(170, 170, 170), RGB(120, 120, 120) };
+    DrawPanelRows(dc, w, *L, text, real);
+    GdiFlush();
+    BITMAPFILEHEADER fh = {}; fh.bfType = 0x4D42; fh.bfOffBits = sizeof(fh) + sizeof(bi.bmiHeader);
+    fh.bfSize = fh.bfOffBits + w * h * 4;
+    if (FILE* f = fopen(saveBmp, "wb")) { fwrite(&fh, sizeof(fh), 1, f); fwrite(&bi.bmiHeader, sizeof(bi.bmiHeader), 1, f); fwrite(bits, 4, (size_t)w * h, f); fclose(f); }
+  }
+  SelectObject(dc, old); DeleteObject(bmp); DeleteDC(dc); ReleaseDC(nullptr, screen);
+}
+#endif
 
 // ------------------------------------------------------------------ fake REAPER
 
@@ -803,6 +847,42 @@ int main()
     CHECK(B[3].Text() == "a" && B[3].label == "INTRO" && B[3].color == colors[0]);
     CHECK(B[0].Text() == "c" && B[0].label == "CHORUS" && B[2].Text() == "d" && B[2].label == "OUTRO");
     CHECK(NoOverlaps() && ItemFits());
+
+    // lyrics panel rows: full line heights, a gap between, nothing overlapping, inside the window
+    {
+      int t[4];
+      int hS = 34, hB = 102, gap = 11;   // e.g. 28 px and 84 px fonts
+      CHECK(PanelRows(282, 44, 594, hS, hB, gap, t));                       // a 600 px tall panel
+      CHECK(t[0] + hS + gap <= t[1] && t[1] + hB + gap <= t[2] && t[2] + hS + gap <= t[3]);
+      CHECK(t[0] >= 44 && t[3] + hS <= 594);
+      CHECK(std::abs((t[1] + hB / 2) - 282) <= 1);                           // current line centred
+      // a short window: rows pushed below the label, then pulled up to fit
+      CHECK(PanelRows(70, 44, 300, hS, hB, gap, t) && t[0] == 44 && t[3] + hS <= 300);
+      // far too small: reports it (the panel then uses smaller fonts)
+      CHECK(!PanelRows(80, 44, 200, hS, hB, gap, t));
+    }
+
+#ifdef _WIN32
+    // drawn with real fonts: each line's lowest pixel (descenders) stays above the next line's
+    // highest pixel, at several window sizes
+    {
+      std::string text[4] = { "jumping quickly by gypsy jigs", "Ygg pulls up the quay gently", "Jog gaily past my pyre", "QUEEN yaps: gjpqy" };
+      int sizes[][2] = { { 900, 600 }, { 600, 320 }, { 420, 220 }, { 1200, 900 } };
+      for (auto& s : sizes)
+      {
+        PanelRowLayout L; PanelInk ink[4];
+        const char* save = (s[0] == 900) ? getenv("LYRICS_PANEL_BMP") : nullptr;
+        RenderPanelRows(s[0], s[1], text, &L, ink, save);
+        bool inked = true, apart = true, inside = true;
+        for (int i = 0; i < 4; i++) inked = inked && ink[i].top >= 0;
+        for (int i = 0; i < 3; i++) apart = apart && ink[i].bottom < ink[i + 1].top;
+        for (int i = 0; i < 4; i++) inside = inside && ink[i].top >= L.tops[i] && ink[i].bottom < L.tops[i] + L.RowH(i);
+        CHECK(inked && apart && inside);
+        if (!(inked && apart && inside))
+          for (int i = 0; i < 4; i++) printf("  %dx%d row %d: box %d..%d ink %d..%d\n", s[0], s[1], i, L.tops[i], L.tops[i] + L.RowH(i), ink[i].top, ink[i].bottom);
+      }
+    }
+#endif
 
     // which lyric windows were open, saved in the project file
     {
