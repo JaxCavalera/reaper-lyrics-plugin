@@ -11,6 +11,19 @@ lines are laid out in full colour and can be moved, stretched and reordered.
   template…*), in the main **Track** menu, and as an action (`Lyrics: Insert lyric track`).
   The track gets one lyric item with an empty INTRO block at the edit cursor, and the
   sequencer opens ready to type.
+- **A lyric track looks like a lyric track**, not an audio track. REAPER draws every track
+  panel from the theme, so an extension can't draw its own; instead the plugin
+  - puts lyric tracks on one of your theme's track-panel layouts — by default its
+    *Minimal* layout if it has one (the Default 4.0 theme does), otherwise the theme
+    default. Choose another from the track dropdown in the sequencer → **Lyric track
+    layout**. Which controls a layout shows is up to the theme (with the v6/v7 default
+    themes, set layouts A/B/C in *Options → Themes → Theme adjuster*);
+  - hides the track from the mixer (it has no audio), gives it a fixed, locked height
+    (search the action list for "height lock" to release it), a speech-bubble icon and a violet colour (your own
+    icon or colour is kept), and switches off record arm, monitoring and input.
+
+  Lyric tracks from older projects get this once when the project opens; after that your
+  changes stay. **Reset lyric track look** in the same dropdown applies it again.
 - **One lyric item per track.** It holds the whole lyric document (blocks, labels, colours,
   line timings) with times relative to the item, so moving the item moves the lyrics. It
   auto-fits: it always starts at the first block and never ends before the last one (drag its

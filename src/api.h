@@ -56,6 +56,7 @@
 // colour
 #define REAPERAPI_WANT_ColorToNative
 #define REAPERAPI_WANT_ColorFromNative
+#define REAPERAPI_WANT_ThemeLayout_GetLayout
 
 #include "../reaper-sdk/sdk/reaper_plugin.h"
 #include "../reaper-sdk/sdk/reaper_plugin_functions.h"

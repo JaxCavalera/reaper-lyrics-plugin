@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "trackstyle.h"
 #include "panel.h"
 #include "util.h"
 #include "resource.h"
@@ -23,7 +24,8 @@ static const COLORREF kButton = RGB(58, 58, 58);
 static const COLORREF kAccent = RGB(74, 144, 217);
 
 enum { BTN_TRACKSEL = 1, BTN_TRACK, BTN_PANEL, BTN_ZOOM_OUT, BTN_ZOOM_IN, BTN_ZOOM_FIT };
-enum { MENU_RENAME = 1, MENU_DELETE, MENU_GOTO, MENU_LABEL_PRESET = 10, MENU_LABEL_AUTO = 30, MENU_COLOR_PRESET = 40, MENU_COLOR_CUSTOM = 60, MENU_COLOR_AUTO, MENU_TRACK = 100 };
+enum { MENU_RENAME = 1, MENU_DELETE, MENU_GOTO, MENU_LABEL_PRESET = 10, MENU_LABEL_AUTO = 30, MENU_COLOR_PRESET = 40, MENU_COLOR_CUSTOM = 60, MENU_COLOR_AUTO, MENU_TRACK = 100,
+       MENU_RESTYLE = 900, MENU_LAYOUT_AUTO, MENU_LAYOUT_DEFAULT, MENU_LAYOUT = 1000 };
 
 struct ColorPreset { const char* name; COLORREF c; };
 static const ColorPreset kColors[] = {
@@ -963,9 +965,32 @@ void LyricEditor::ShowTrackMenu(POINT pt)
   if (tracks.empty()) AddMenu(m, MF_STRING | MF_GRAYED, 0, "(no lyric tracks in this project)");
   AddMenu(m, MF_SEPARATOR, 0, nullptr);
   AddMenu(m, MF_STRING, MENU_TRACK - 1, "Insert new lyric track");
+
+  // the theme layout lyric tracks use in the track panel
+  AddMenu(m, MF_SEPARATOR, 0, nullptr);
+  HMENU lay = CreatePopupMenu();
+  std::vector<std::string> layouts = TrackStyle::TcpLayouts();
+  std::string setting = TrackStyle::LayoutSetting(), autoPick = TrackStyle::PickLayout(TrackStyle::kAuto, layouts);
+  std::string autoText = "Automatic (" + (autoPick.empty() ? std::string("theme default - no Minimal layout in this theme") : autoPick) + ")";
+  AddMenu(lay, MF_STRING | (setting == TrackStyle::kAuto ? MF_CHECKED : 0), MENU_LAYOUT_AUTO, autoText.c_str());
+  AddMenu(lay, MF_STRING | (setting.empty() ? MF_CHECKED : 0), MENU_LAYOUT_DEFAULT, "Theme default");
+  if (!layouts.empty()) AddMenu(lay, MF_SEPARATOR, 0, nullptr);
+  for (size_t i = 0; i < layouts.size() && i < 200; i++)
+    AddMenu(lay, MF_STRING | (setting == layouts[i] ? MF_CHECKED : 0), MENU_LAYOUT + (int)i, layouts[i].c_str());
+  AddMenu(lay, MF_SEPARATOR, 0, nullptr);
+  AddMenu(lay, MF_STRING | MF_GRAYED, 0, "Pick which controls a layout shows in REAPER's theme adjuster");
+  AddMenu(m, MF_POPUP, (UINT_PTR)lay, "Lyric track layout");
+  AddMenu(m, MF_STRING, MENU_RESTYLE, "Reset lyric track look (height, icon, colour, hidden in mixer)");
+
   int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_NONOTIFY, pt.x, pt.y, 0, m_hwnd, nullptr);
   DestroyMenu(m);
-  if (cmd >= MENU_TRACK && cmd - MENU_TRACK < (int)tracks.size()) BindTrack(tracks[cmd - MENU_TRACK]);
+  if (cmd == MENU_LAYOUT_AUTO || cmd == MENU_LAYOUT_DEFAULT || (cmd >= MENU_LAYOUT && cmd - MENU_LAYOUT < (int)layouts.size()))
+  {
+    TrackStyle::SetLayoutSetting(cmd == MENU_LAYOUT_AUTO ? std::string(TrackStyle::kAuto) : cmd == MENU_LAYOUT_DEFAULT ? std::string() : layouts[cmd - MENU_LAYOUT]);
+    TrackStyle::ApplyAll(p, true);
+  }
+  else if (cmd == MENU_RESTYLE) TrackStyle::ApplyAll(p, false);
+  else if (cmd >= MENU_TRACK && cmd - MENU_TRACK < (int)tracks.size()) BindTrack(tracks[cmd - MENU_TRACK]);
   else if (cmd == MENU_TRACK - 1 && p)
   {
     MediaTrack* t = LyricDoc::CreateLyricTrack(p);

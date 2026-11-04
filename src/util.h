@@ -17,6 +17,8 @@ void Utf8Append(std::string& s, unsigned cp);
 std::string IniPath();
 int IniGetInt(const char* section, const char* key, int def);
 void IniSetInt(const char* section, const char* key, int v);
+std::string IniGetStr(const char* section, const char* key, const char* def);
+void IniSetStr(const char* section, const char* key, const char* v);
 
 // colours
 COLORREF NativeToColorref(int native);  // REAPER native|0x1000000 -> COLORREF

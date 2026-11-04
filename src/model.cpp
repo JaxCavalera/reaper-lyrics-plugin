@@ -1,4 +1,5 @@
 #include "model.h"
+#include "trackstyle.h"
 #include "util.h"
 #include <algorithm>
 #include <cmath>
@@ -233,7 +234,7 @@ MediaTrack* LyricDoc::CreateLyricTrack(ReaProject* p)
     GetSetMediaTrackInfo_String(t, "P_NAME", name, true);
     char one[] = "1";
     GetSetMediaTrackInfo_String(t, "P_EXT:LYR", one, true);
-    SetMediaTrackInfo_Value(t, "I_HEIGHTOVERRIDE", 48);
+    TrackStyle::Apply(t, true, TrackStyle::IconFile());   // layout, no mixer, height, icon, colour
     SetOnlyTrackSelected(t);
   }
   Undo_EndBlock2(p, "Insert lyric track", -1);

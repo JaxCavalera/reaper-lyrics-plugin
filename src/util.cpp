@@ -93,6 +93,18 @@ void IniSetInt(const char* section, const char* key, int v)
   WritePrivateProfileString(section, key, buf, IniPath().c_str());
 }
 
+std::string IniGetStr(const char* section, const char* key, const char* def)
+{
+  char buf[1024] = "";
+  GetPrivateProfileString(section, key, def, buf, sizeof(buf), IniPath().c_str());
+  return buf;
+}
+
+void IniSetStr(const char* section, const char* key, const char* v)
+{
+  WritePrivateProfileString(section, key, v, IniPath().c_str());
+}
+
 // ---------------------------------------------------------------- colours
 
 COLORREF NativeToColorref(int native)

@@ -3,6 +3,7 @@
 #define REAPERAPI_IMPLEMENT
 #include "api.h"
 #include "model.h"
+#include "trackstyle.h"
 #include "util.h"
 #include <algorithm>
 #include <cmath>
@@ -17,7 +18,7 @@
 
 struct FakeTrack;
 struct FakeItem { double pos = 0, len = 0; int color = 0; FakeTrack* track = nullptr; std::map<std::string, std::string> str; };
-struct FakeTrack { std::map<std::string, std::string> str; std::vector<FakeItem*> items; GUID guid; };
+struct FakeTrack { std::map<std::string, std::string> str; std::map<std::string, double> num; std::vector<FakeItem*> items; GUID guid; };
 struct FakeMarker { double pos; std::string name; int color; };
 
 static std::vector<std::unique_ptr<FakeTrack>> g_tracks;
@@ -73,9 +74,16 @@ static void InstallFakes()
   GetSetMediaTrackInfo_String = [](MediaTrack* t, const char* k, char* buf, bool set) { return StrGetSet(T(t)->str, k, buf, set); };
   GetMediaTrackInfo_Value = [](MediaTrack* t, const char* k) -> double {
     if (!strcmp(k, "IP_TRACKNUMBER")) for (size_t i = 0; i < g_tracks.size(); i++) if (g_tracks[i].get() == T(t)) return (double)(i + 1);
-    return 0;
+    auto it = T(t)->num.find(k);
+    return it == T(t)->num.end() ? 0.0 : it->second;
   };
-  SetMediaTrackInfo_Value = [](MediaTrack*, const char*, double) { return true; };
+  SetMediaTrackInfo_Value = [](MediaTrack* t, const char* k, double v) { T(t)->num[k] = v; return true; };
+  ThemeLayout_GetLayout = [](const char* sec, int idx, char* out, int sz) {
+    static const char* tcp[] = { "Tracking", "150%_Tracking", "Reduced", "Minimal", "Top Aligned" };
+    if (strcmp(sec, "tcp") || idx < 0 || idx >= 5) return false;
+    snprintf(out, sz, "%s", tcp[idx]);
+    return true;
+  };
   GetTrackGUID = [](MediaTrack* t) { return &T(t)->guid; };
   guidToString = [](const GUID* g, char* out) { sprintf(out, "{TRACK-%08X}", (unsigned)g->Data1); };
   AddMediaItemToTrack = [](MediaTrack* t) {
@@ -479,6 +487,47 @@ int main()
     CHECK(B[2].label == "HOOK" && B[2].color == pink);
     g_doc.Bind(kProj, t4);
     CHECK(B[2].color == pink && B[1].color == green && B[4].color == grey);
+  }
+
+  // --- lyric track look: theme layout, hidden in mixer, fixed height, colour, no recording
+  {
+    std::vector<std::string> lay = TrackStyle::TcpLayouts();
+    CHECK(lay.size() == 4 && lay[2] == "Minimal");                              // hi-DPI variant skipped
+    CHECK(TrackStyle::PickLayout(TrackStyle::kAuto, lay) == "Minimal");         // automatic
+    CHECK(TrackStyle::PickLayout("", lay) == "");                               // theme default
+    CHECK(TrackStyle::PickLayout("Reduced", lay) == "Reduced");
+    CHECK(TrackStyle::PickLayout(TrackStyle::kAuto, { "A", "B", "C" }) == "");  // no Minimal: default
+
+    // a new lyric track is styled straight away
+    FakeTrack* nt = T(LyricDoc::CreateLyricTrack(kProj));
+    CHECK(nt->str["P_TCP_LAYOUT"] == "Minimal");
+    CHECK(nt->num.count("B_SHOWINMIXER") && nt->num["B_SHOWINMIXER"] == 0);
+    CHECK(nt->num["I_HEIGHTOVERRIDE"] == TrackStyle::Height() && nt->num["B_HEIGHTLOCK"] == 1);
+    CHECK(nt->num["I_RECARM"] == 0 && nt->num["I_RECMON"] == 0 && nt->num["I_RECINPUT"] == -1);
+    CHECK((int)nt->num["I_CUSTOMCOLOR"] == TrackStyle::DefaultColor());
+    CHECK(TrackStyle::IsStyled((MediaTrack*)nt));
+
+    // an older lyric track (no style yet, user colour + icon) is styled once, keeping both
+    g_tracks.push_back(std::make_unique<FakeTrack>());
+    FakeTrack* old = g_tracks.back().get();
+    old->str["P_EXT:LYR"] = "1"; old->str["P_ICON"] = "mine.png"; old->num["I_CUSTOMCOLOR"] = 0x1000000 | 123;
+    CHECK(TrackStyle::StyleNewTracks(kProj) == 1);
+    CHECK(old->str["P_TCP_LAYOUT"] == "Minimal" && old->num["B_SHOWINMIXER"] == 0 && old->num["B_HEIGHTLOCK"] == 1);
+    CHECK(old->str["P_ICON"] == "mine.png" && (int)old->num["I_CUSTOMCOLOR"] == (0x1000000 | 123));
+    // ...and then left alone: a height the user changes later is not reset
+    old->num["I_HEIGHTOVERRIDE"] = 120;
+    CHECK(TrackStyle::StyleNewTracks(kProj) == 0 && old->num["I_HEIGHTOVERRIDE"] == 120);
+
+    // a layout change reaches every lyric track, and ordinary tracks are never touched
+    g_tracks.push_back(std::make_unique<FakeTrack>());
+    FakeTrack* audio = g_tracks.back().get();
+    TrackStyle::SetLayoutSetting("Reduced", false);
+    TrackStyle::ApplyAll(kProj, true);
+    CHECK(nt->str["P_TCP_LAYOUT"] == "Reduced" && old->str["P_TCP_LAYOUT"] == "Reduced");
+    CHECK(old->num["I_HEIGHTOVERRIDE"] == 120);                                  // layout only
+    TrackStyle::StyleNewTracks(kProj);
+    TrackStyle::ApplyAll(kProj, false);
+    CHECK(audio->str.empty() && audio->num.empty());
   }
 
   printf("%d passed, %d failed\n", g_pass, g_fail);

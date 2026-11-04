@@ -3,6 +3,7 @@
 #include "plugin.h"
 #include "editor.h"
 #include "panel.h"
+#include "trackstyle.h"
 #include <cstring>
 #include <cctype>
 
@@ -181,6 +182,13 @@ static void UnhookArrange()
 static void TimerFn()
 {
   HookArrange();   // the arrange view may not exist yet when the plugin loads
+  static DWORD lastStyle = 0;
+  DWORD now = GetTickCount();
+  if (now - lastStyle >= 1000)   // lyric tracks from older projects get the lyric track look
+  {
+    lastStyle = now;
+    TrackStyle::StyleNewTracks(EnumProjects(-1, nullptr, 0));
+  }
   LyricEditor::Get().OnTimer();
   LyricsPanel::Get().OnTimer();
 }
@@ -220,6 +228,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   RegisterAction(rec, 2, "LYRICS_TOGGLE_PANEL", "Lyrics: Show/hide lyrics panel", &g_cmdPanel);
   RegisterAction(rec, 3, "LYRICS_TOGGLE_TRACKING", "Lyrics: Toggle editor tracking (follow playback)", &g_cmdTracking);
 
+  TrackStyle::LoadSettings();
   rec->Register("hookcommand", (void*)HookCommand);
   rec->Register("toggleaction", (void*)ToggleAction);
   rec->Register("hookcustommenu", (void*)MenuHook);

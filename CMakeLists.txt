@@ -11,6 +11,7 @@ endif()
 set(SOURCES
   src/main.cpp
   src/model.cpp
+  src/trackstyle.cpp
   src/editor.cpp
   src/panel.cpp
   src/textedit.cpp
@@ -50,7 +51,7 @@ endif()
 #   cmake -S . -B build -DLYRICS_BUILD_TESTS=ON && cmake --build build --config Release --target model_test
 option(LYRICS_BUILD_TESTS "Build the model tests" OFF)
 if(LYRICS_BUILD_TESTS)
-  set(TEST_SOURCES tests/model_test.cpp src/model.cpp src/util.cpp)
+  set(TEST_SOURCES tests/model_test.cpp src/model.cpp src/trackstyle.cpp src/util.cpp)
   if(WIN32)
     list(APPEND TEST_SOURCES WDL/WDL/win32_utf8.c)
   else()
