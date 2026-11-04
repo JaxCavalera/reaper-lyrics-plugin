@@ -10,7 +10,7 @@ lines are laid out in full colour and can be moved, stretched and reordered.
 - **Insert lyric track** in the track-panel right-click menu (next to *Insert track from
   template…*), in the main **Track** menu, and as an action (`Lyrics: Insert lyric track`).
   The track gets one lyric item with an empty INTRO block at the edit cursor, and the
-  sequencer opens ready to type.
+  sequencer opens with the caret in it — click into the text to start typing.
 - **A lyric track looks like a lyric track**, not an audio track. REAPER draws every track
   panel from the theme, so an extension can't draw its own; instead the plugin
   - puts lyric tracks on one of your theme's track-panel layouts — by default its
@@ -177,6 +177,12 @@ build/Release/model_test      # Linux (single-config): build/model_test
 
 Actions (Actions → Show action list, filter "Lyrics:"): *Insert lyric track*,
 *Show/hide lyric sequencer*, *Show/hide lyrics panel*, *Toggle editor tracking*.
+
+The sequencer only takes the keyboard while you are typing: after you click into the lyric
+text, or while a label is being renamed. Clicking anywhere else in the window (the lane,
+the toolbar, the labels) or pressing **Esc** in the text hands the keys back to REAPER, so
+space, shortcuts and Ctrl+C/V work on the project as usual even with the sequencer focused.
+Even while typing, F-keys and Ctrl shortcuts the text doesn't use (Ctrl+S, ...) go to REAPER.
 
 Text keys: the usual — arrows, Home/End, PgUp/PgDn, Shift to select, Ctrl+A/C/X/V,
 Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo within the text.

@@ -56,6 +56,11 @@ bool PrepareBlockPaste(const std::vector<std::string>& lines, int caretLine, std
 // Insertion index in the current order (as LyricDoc::MoveBlock takes it): before the first
 // other block whose middle is below the ghost; == dragged means it stays put.
 int DragInsertIndex(const std::vector<std::pair<int, int>>& spans, int dragged, int ghostMid);
+
+// Where a key pressed in the sequencer window goes. wantsKeys: the lyric text was clicked
+// into, or a label is being renamed.
+enum KeyRoute { KEY_DEFAULT, KEY_TO_REAPER, KEY_TO_EDITOR };
+KeyRoute RouteEditorKey(bool wantsKeys, unsigned msg, int vk, bool ctrl);
 // Where each block's label goes if dropped at insertion index `to`: the blocks laid out from
 // y0 in the new order, each taking `heights[i]` - so the others shunt up or down to make room.
 // slotY receives the dragged block's landing position.

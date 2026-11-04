@@ -101,7 +101,8 @@ void LyricEditor::Create()
   m_rename.colBg = RGB(250, 250, 250); m_rename.colFg = RGB(20, 20, 20); m_rename.colCaret = RGB(20, 20, 20); m_rename.colSel = RGB(170, 200, 240);
   m_rename.onEnterSingle = [this] { CommitRename(true); };
   m_rename.onEscape = [this] { CommitRename(false); };
-  m_text.SetFocus(true);
+  m_text.onEscape = [this] { SetTextActive(false); Invalidate(); };   // hand the keys back to REAPER
+  SetTextActive(false);
 
   RECT r;
   if (!LoadWindowRect("sequencer", &r)) { r.left = 160; r.top = 120; r.right = 1160; r.bottom = 820; }
@@ -223,9 +224,16 @@ void LyricEditor::OnPaste(std::string& text)
   for (size_t k = 0; k < m_pendingPaste.size(); k++) m_pendingPaste[k].para = first + (int)k;
 }
 
+void LyricEditor::SetTextActive(bool on)
+{
+  m_textActive = on;
+  if (!m_renaming) m_text.SetFocus(on && m_hwnd && GetFocus() == m_hwnd);
+}
+
 void LyricEditor::ShowTextMenu(int x, int y)
 {
-  m_text.SetFocus(true);
+  SetFocus(m_hwnd);
+  SetTextActive(true);   // right-clicking the text is clicking into it
   m_text.ContextClick(x, y);
   Invalidate();
   bool sel = m_text.HasSelection();
@@ -309,9 +317,7 @@ void LyricEditor::StartNewBlock()
   if (!m_hwnd || m_renaming || !g_doc.IsBound()) return;
   if (g_doc.blocks.empty()) { g_doc.AppendBlock(); m_needFit = true; RefreshText(); }
   else if (!(g_doc.blocks.size() == 1 && g_doc.blocks[0].Text().empty())) OnBeforeNewline();
-  m_text.StartParagraphAtEnd();
-  m_text.SetFocus(true);
-  SetFocus(m_hwnd);
+  m_text.StartParagraphAtEnd();   // caret placed; typing starts once the text is clicked into
   RebuildLayout();
   UpdateStatus();
   Invalidate();
@@ -888,8 +894,7 @@ void LyricEditor::FocusBlockInText(int block, int line)
   if (block < 0 || block >= (int)m_layout.size()) return;
   int ln = std::min(m_layout[block].first + std::max(0, line), m_layout[block].last);
   m_text.SetCaret({ ln, 0 });
-  m_text.EnsureCaretVisible();
-  m_text.SetFocus(true);
+  m_text.EnsureCaretVisible();   // shows it; keyboard focus stays where it is
   Invalidate();
 }
 
@@ -905,6 +910,7 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
     if (k == HIT_NONE) return false;
     SetFocus(m_hwnd);
     if (m_renaming) CommitRename(true);
+    SetTextActive(false);   // a click in the lane is not a click into the text
     if (k == HIT_SCROLL)
     {
       LaneRange(&m_scrollLo, &m_scrollHi);
@@ -1195,7 +1201,7 @@ void LyricEditor::CommitRename(bool apply)
   }
   m_renameBlock = -1;
   m_rename.SetFocus(false);
-  m_text.SetFocus(true);
+  SetTextActive(m_textActive);   // back to where the keys went before the rename
   Invalidate();
 }
 
@@ -1276,11 +1282,13 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     if (m_text.HitTest(x, y))
     {
-      m_text.SetFocus(true);
+      SetTextActive(true);
       if (m_text.OnMouse(msg, wp, x, y)) { m_textCapture = true; SetCapture(h); }
       Invalidate();
       return 1;
     }
+    SetTextActive(false);   // toolbar, label gutter, empty space: keys stay REAPER's
+    Invalidate();
     if (y < m_toolbar.bottom) { int id = ButtonAt(x, y); if (id) OnButton(id); return 1; }
     if (x < m_gutter.right)
     {
@@ -1396,7 +1404,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (handled) { Invalidate(); return 1; }
     return 0;
   }
-  case WM_SETFOCUS: if (!m_renaming) m_text.SetFocus(true); Invalidate(); return 0;
+  case WM_SETFOCUS: if (!m_renaming) m_text.SetFocus(m_textActive); Invalidate(); return 0;   // only if it was clicked into
   case WM_KILLFOCUS: m_text.SetFocus(false); if (m_renaming) CommitRename(true); Invalidate(); return 0;
   case WM_CLOSE: Show(false); return 1;
 #ifdef _WIN32

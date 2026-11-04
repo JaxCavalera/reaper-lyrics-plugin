@@ -676,6 +676,20 @@ int main()
     CHECK(B[0].Text() == "c" && B[0].label == "CHORUS" && B[2].Text() == "d" && B[2].label == "OUTRO");
     CHECK(NoOverlaps() && ItemFits());
 
+    // keys in the sequencer window: REAPER's unless the text was clicked into / a label is renamed
+    CHECK(RouteEditorKey(false, WM_KEYDOWN, VK_SPACE, false) == KEY_TO_REAPER);   // space = play
+    CHECK(RouteEditorKey(false, WM_KEYUP, VK_SPACE, false) == KEY_TO_REAPER);
+    CHECK(RouteEditorKey(false, WM_CHAR, ' ', false) == KEY_TO_REAPER);
+    CHECK(RouteEditorKey(false, WM_KEYDOWN, 'V', true) == KEY_TO_REAPER);         // Ctrl+V pastes in REAPER
+    CHECK(RouteEditorKey(false, WM_KEYDOWN, VK_DELETE, false) == KEY_TO_REAPER);
+    CHECK(RouteEditorKey(true, WM_KEYDOWN, VK_SPACE, false) == KEY_TO_EDITOR);     // typing in the text
+    CHECK(RouteEditorKey(true, WM_CHAR, 'a', false) == KEY_TO_EDITOR);
+    CHECK(RouteEditorKey(true, WM_KEYDOWN, 'V', true) == KEY_TO_EDITOR);
+    CHECK(RouteEditorKey(true, WM_KEYDOWN, 'S', true) == KEY_TO_REAPER);          // Ctrl+S still saves
+    CHECK(RouteEditorKey(true, WM_KEYDOWN, VK_F5, false) == KEY_TO_REAPER);
+    CHECK(RouteEditorKey(true, WM_SYSKEYDOWN, 'F', false) == KEY_DEFAULT);
+    CHECK(RouteEditorKey(false, WM_MOUSEMOVE, 0, false) == KEY_DEFAULT);
+
     // the editor drag: drop index from the ghost, and the other labels shunting to make room
     // (three blocks of 1, 2 and 1 lines at 20 px a line, a blank line after each)
     std::vector<std::pair<int, int>> spans = { { 0, 20 }, { 40, 80 }, { 100, 120 } };

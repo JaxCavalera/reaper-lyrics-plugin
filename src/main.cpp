@@ -4,6 +4,7 @@
 #include "editor.h"
 #include "panel.h"
 #include "trackstyle.h"
+#include "util.h"
 #include <cstring>
 #include <cctype>
 
@@ -77,20 +78,18 @@ static void MenuHook(const char* menuid, void* menu, int flag)
 
 // REAPER routes keystrokes through its accelerator processing first. Without this hook,
 // keys aimed at the editor are treated as dialog mnemonics / REAPER shortcuts and typed
-// characters never arrive. While the editor has focus we deliver keys to it ourselves,
-// except F-keys and Ctrl shortcuts the editor doesn't use, which go to REAPER (Ctrl+S etc).
+// characters never arrive. Only while the lyric text has been clicked into (or a label is
+// being renamed) do we deliver keys to the editor ourselves, and even then F-keys and Ctrl
+// shortcuts the editor doesn't use go to REAPER (Ctrl+S etc). Otherwise the sequencer
+// merely having focus changes nothing: every key goes to REAPER (space = play, ...).
 static int TranslateAccel(MSG* msg, accelerator_register_t*)
 {
   HWND ed = LyricEditor::Get().Hwnd();
   if (!ed || !msg->hwnd || (msg->hwnd != ed && !IsChild(ed, msg->hwnd))) return 0;
   UINT m = msg->message;
-  if (m == WM_SYSKEYDOWN || m == WM_SYSKEYUP) return 0;          // Alt combos: REAPER's business
-  if (m == WM_KEYDOWN)
-  {
-    int vk = (int)msg->wParam;
-    if (vk >= VK_F1 && vk <= VK_F24) return -666;
-    if (CtrlDown() && vk >= 'A' && vk <= 'Z' && !strchr("ACXVZY", vk)) return -666;
-  }
+  KeyRoute r = RouteEditorKey(LyricEditor::Get().WantsKeys(), m, (int)msg->wParam, CtrlDown());
+  if (r == KEY_DEFAULT) return 0;
+  if (r == KEY_TO_REAPER) return -666;                             // to REAPER's main window
 #ifdef _WIN32
   if (m == WM_KEYDOWN) TranslateMessage(msg);                     // generates the WM_CHAR we insert
   DispatchMessage(msg);

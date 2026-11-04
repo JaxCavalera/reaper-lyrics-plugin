@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 
 std::string FormatStr(const char* fmt, ...)
 {
@@ -221,6 +222,19 @@ bool PrepareBlockPaste(const std::vector<std::string>& lines, int caretLine, std
   if (caretLine + 1 < (int)lines.size() && !Trim(lines[caretLine + 1]).empty()) text += "\n";
   *firstPara = CountParagraphs(lines, caretLine);
   return true;
+}
+
+KeyRoute RouteEditorKey(bool wantsKeys, unsigned msg, int vk, bool ctrl)
+{
+  if (msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) return KEY_DEFAULT;   // Alt combos: REAPER's business
+  bool key = msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR;
+  if (!wantsKeys) return key ? KEY_TO_REAPER : KEY_DEFAULT;          // sequencer focused, text not
+  if (msg == WM_KEYDOWN)
+  {
+    if (vk >= VK_F1 && vk <= VK_F24) return KEY_TO_REAPER;
+    if (ctrl && vk >= 'A' && vk <= 'Z' && !strchr("ACXVZY", vk)) return KEY_TO_REAPER;
+  }
+  return KEY_TO_EDITOR;
 }
 
 int DragInsertIndex(const std::vector<std::pair<int, int>>& spans, int dragged, int ghostMid)

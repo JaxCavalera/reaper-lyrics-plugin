@@ -15,6 +15,9 @@ public:
   void Toggle() { Show(!IsVisible()); }
   bool IsVisible() const;
   HWND Hwnd() const { return m_hwnd; }
+  // keys go to the sequencer only while the lyric text was clicked into or a label is being
+  // renamed; otherwise they are REAPER's (space = play, shortcuts, ...)
+  bool WantsKeys() const { return m_renaming || m_textActive; }
   void BindTrack(MediaTrack* t);
   void OpenForTrack(MediaTrack* t);   // double-click on a lyric item: bind, show, fit the view
   void OnTimer();          // called from the plugin timer (UI thread)
@@ -83,6 +86,8 @@ private:
   TextEdit m_text;
   TextEdit m_rename;
   bool m_renaming = false; int m_renameBlock = -1;
+  bool m_textActive = false;   // the user clicked into the lyric text (Esc or a click elsewhere ends it)
+  void SetTextActive(bool on);
   HFONT m_font = nullptr, m_fontUi = nullptr, m_fontChip = nullptr, m_fontLane = nullptr;
   std::vector<Layout> m_layout;
   std::vector<Button> m_buttons;
