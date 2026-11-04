@@ -17,7 +17,9 @@
 // ------------------------------------------------------------------ fake REAPER
 
 struct FakeTrack;
-struct FakeItem { double pos = 0, len = 0; int color = 0; FakeTrack* track = nullptr; std::map<std::string, std::string> str; };
+struct FakeTakeMarker { double srcpos; std::string name; int color; };
+struct FakeTake { std::map<std::string, std::string> str; double startoffs = 0; std::vector<FakeTakeMarker> marks; };
+struct FakeItem { double pos = 0, len = 0; int color = 0; bool loop = true, sel = false; FakeTrack* track = nullptr; std::map<std::string, std::string> str; std::unique_ptr<FakeTake> take; };
 struct FakeTrack { std::map<std::string, std::string> str; std::map<std::string, double> num; std::vector<FakeItem*> items; GUID guid; };
 struct FakeMarker { double pos; std::string name; int color; };
 
@@ -108,13 +110,58 @@ static void InstallFakes()
     if (!strcmp(k, "D_POSITION")) return I(it)->pos;
     if (!strcmp(k, "D_LENGTH")) return I(it)->len;
     if (!strcmp(k, "I_CUSTOMCOLOR")) return I(it)->color;
+    if (!strcmp(k, "B_LOOPSRC")) return I(it)->loop ? 1 : 0;
+    if (!strcmp(k, "B_UISEL")) return I(it)->sel ? 1 : 0;
     return 0;
   };
   SetMediaItemInfo_Value = [](MediaItem* it, const char* k, double v) {
     if (!strcmp(k, "D_POSITION")) I(it)->pos = v;
     else if (!strcmp(k, "D_LENGTH")) I(it)->len = v;
     else if (!strcmp(k, "I_CUSTOMCOLOR")) I(it)->color = (int)v;
+    else if (!strcmp(k, "B_LOOPSRC")) I(it)->loop = v != 0;
+    else if (!strcmp(k, "B_UISEL")) I(it)->sel = v != 0;
     Bump(); return true;
+  };
+  // an empty MIDI item: one take; QN = seconds * 2 (120 bpm)
+  TimeMap2_timeToQN = [](ReaProject*, double t) { return t * 2.0; };
+  CreateNewMIDIItemInProj = [](MediaTrack* t, double s, double e, const bool*) {
+    MediaItem* it = AddMediaItemToTrack(t);
+    I(it)->pos = s; I(it)->len = e - s;
+    I(it)->take = std::make_unique<FakeTake>();
+    I(it)->take->str["P_NAME"] = "untitled MIDI item";
+    return it;
+  };
+  MIDI_SetItemExtents = [](MediaItem* it, double s, double e) {
+    if (!I(it)->take) return false;
+    I(it)->pos = s / 2.0; I(it)->len = (e - s) / 2.0;   // the source follows: offset stays 0
+    Bump(); return true;
+  };
+  GetActiveTake = [](MediaItem* it) { return (MediaItem_Take*)I(it)->take.get(); };
+  GetSetMediaItemTakeInfo_String = [](MediaItem_Take* tk, const char* k, char* buf, bool set) { return StrGetSet(((FakeTake*)tk)->str, k, buf, set); };
+  GetMediaItemTakeInfo_Value = [](MediaItem_Take* tk, const char* k) -> double {
+    if (!strcmp(k, "D_STARTOFFS")) return ((FakeTake*)tk)->startoffs;
+    if (!strcmp(k, "D_PLAYRATE")) return 1.0;
+    return 0;
+  };
+  GetNumTakeMarkers = [](MediaItem_Take* tk) { return (int)((FakeTake*)tk)->marks.size(); };
+  GetTakeMarker = [](MediaItem_Take* tk, int i, char* name, int sz, int* col) -> double {
+    auto& m = ((FakeTake*)tk)->marks;
+    if (i < 0 || i >= (int)m.size()) return -1;
+    snprintf(name, sz, "%s", m[i].name.c_str());
+    if (col) *col = m[i].color;
+    return m[i].srcpos;
+  };
+  SetTakeMarker = [](MediaItem_Take* tk, int i, const char* name, double* sp, int* col) {
+    auto& m = ((FakeTake*)tk)->marks;
+    if (i < 0) { m.push_back({ sp ? *sp : 0, name ? name : "", col ? *col : 0 }); i = (int)m.size() - 1; }
+    else { if (name) m[i].name = name; if (sp) m[i].srcpos = *sp; if (col) m[i].color = *col; }
+    std::stable_sort(m.begin(), m.end(), [](const FakeTakeMarker& a, const FakeTakeMarker& b) { return a.srcpos < b.srcpos; });
+    Bump(); return i;
+  };
+  DeleteTakeMarker = [](MediaItem_Take* tk, int i) {
+    auto& m = ((FakeTake*)tk)->marks;
+    if (i < 0 || i >= (int)m.size()) return false;
+    m.erase(m.begin() + i); Bump(); return true;
   };
   DeleteProjectMarker = [](ReaProject*, int id, bool) { bool had = g_markers.erase(id) > 0; Bump(); return had; };
   EnumProjectMarkers3 = [](ReaProject*, int idx, bool* isrgn, double* pos, double* end, const char** name, int* id, int* color) {
@@ -149,13 +196,26 @@ static FakeItem* LyricItem() { return LyricTrack()->items.empty() ? nullptr : Ly
 static std::string ItemStr(FakeItem* i, const char* k) { auto it = i->str.find(k); return it == i->str.end() ? "" : it->second; }
 static void Sync() { if (g_doc.NeedsSync()) g_doc.SyncFromReaper(); }
 
-// Nothing on the main timeline but the one lyric item: no project markers, one item, showing
-// the current lyrics as its text.
+// The lyric item's take markers are exactly the blocks: label + colour at each block start.
+static bool MarksMatchBlocks()
+{
+  FakeItem* it = LyricItem();
+  if (!it || !it->take) return false;
+  auto& m = it->take->marks;
+  auto& B = g_doc.blocks;
+  if (m.size() != B.size()) return false;
+  for (size_t i = 0; i < B.size(); i++)
+    if (std::fabs(m[i].srcpos - (B[i].start - it->pos)) > 1e-6 || m[i].name != B[i].label || m[i].color != B[i].color) return false;
+  return true;
+}
+
+// Nothing on the main timeline but the one lyric item: no project markers, one item (an
+// empty MIDI item, no notes text), showing only the block labels as take markers.
 static bool OnlyTheLyricItem()
 {
   if (!g_markers.empty() || LyricTrack()->items.size() != 1) return false;
   FakeItem* it = LyricItem();
-  return ItemStr(it, "P_NOTES") == LyricDoc::ItemNotes(g_doc.blocks) && !ItemStr(it, "P_EXT:LYRD").empty();
+  return it->take && ItemStr(it, "P_NOTES").empty() && !ItemStr(it, "P_EXT:LYRD").empty() && MarksMatchBlocks();
 }
 
 // The item starts at the first block and doesn't end before the last.
@@ -501,21 +561,46 @@ int main()
     CHECK(B[2].color == pink && B[1].color == green && B[4].color == bridge);
   }
 
-  // --- the lyric item shows the lyrics on the timeline (never "Empty Item")
+  // --- on the timeline the lyric item is a normal (empty MIDI) item showing only the block
+  //     labels, as take markers at each block start in the block colour; no lyric text
   {
     MediaTrack* t5 = LyricDoc::CreateLyricTrack(kProj);
     g_cursor = 500.0;
     g_doc.Bind(kProj, t5);
     g_doc.AppendBlock(); Sync();
-    CHECK(ItemStr(LyricItem(), "P_NOTES") == "Lyrics");                     // nothing typed yet
+    FakeItem* li = LyricItem();
+    CHECK(li->take && !li->loop && li->take->str["P_NAME"].empty());     // no take name, no looping
+    CHECK(li->take->marks.size() == 1 && li->take->marks[0].name == "INTRO" && Near(li->take->marks[0].srcpos, 0));
     g_doc.ApplyText("hello\nworld\n\nsecond", nullptr); Sync();
-    CHECK(ItemStr(LyricItem(), "P_NOTES") == "INTRO: hello / world  |  VERSE: second");
+    CHECK(MarksMatchBlocks() && li->take->marks[1].name == "VERSE");
+    CHECK(ItemStr(li, "P_NOTES").empty());                                // no lyrics text on the item
     g_doc.SetLabel(1, "HOOK", true); Sync();
-    CHECK(ItemStr(LyricItem(), "P_NOTES") == "INTRO: hello / world  |  HOOK: second");
-    // a lyric item from an earlier build (no notes) gets them when it is read
-    LyricItem()->str.erase("P_NOTES"); Bump();
+    CHECK(MarksMatchBlocks() && li->take->marks[1].name == "HOOK");
+    g_doc.SetColor(1, ColorToNative(1, 2, 3) | 0x1000000, true); Sync();
+    CHECK(MarksMatchBlocks() && li->take->marks[1].color == (ColorToNative(1, 2, 3) | 0x1000000));
+    g_doc.DragBlockTo(1, g_doc.blocks[1].start + 3.0); Sync();
+    CHECK(MarksMatchBlocks());                                            // moved block: marker moved
+    // item covers every block, so every marker is inside it
+    CHECK(Near(li->pos, g_doc.blocks.front().start) && li->pos + li->len >= g_doc.blocks.back().end - 1e-6);
+    // the user moves the item in REAPER: markers travel with it
+    li->pos += 10.0; Bump(); Sync();
+    CHECK(Near(g_doc.blocks[0].start, li->pos) && MarksMatchBlocks());
+    // nothing changed: markers are not rewritten
+    int st = g_state; g_doc.Bind(kProj, t5);
+    CHECK(g_state == st && MarksMatchBlocks());
+
+    // a lyric item from an earlier build (empty item, no take) is swapped for one with a take
+    std::string doc = ItemStr(li, "P_EXT:LYRD");
+    double p0 = li->pos, l0 = li->len;
+    std::string text0 = g_doc.ToText();
+    DeleteTrackMediaItem(t5, (MediaItem*)li);
+    FakeItem* old = I(AddMediaItemToTrack(t5));
+    old->pos = p0; old->len = l0; old->sel = true;
+    old->str["P_EXT:LYRD"] = doc; old->str["P_NOTES"] = "INTRO: hello / world";
     g_doc.Bind(kProj, t5);
-    CHECK(ItemStr(LyricItem(), "P_NOTES") == "INTRO: hello / world  |  HOOK: second");
+    li = LyricItem();
+    CHECK(li != old && li->take && li->sel && Near(li->pos, p0) && Near(li->len, l0));
+    CHECK(ItemStr(li, "P_EXT:LYRD") == doc && g_doc.ToText() == text0);
     CHECK(OnlyTheLyricItem());
   }
 

@@ -42,6 +42,17 @@
 #define REAPERAPI_WANT_GetMediaItem_Track
 #define REAPERAPI_WANT_GetItemFromPoint
 #define REAPERAPI_WANT_Undo_OnStateChange_Item
+// the lyric item's empty MIDI take and its take markers (one per block)
+#define REAPERAPI_WANT_CreateNewMIDIItemInProj
+#define REAPERAPI_WANT_MIDI_SetItemExtents
+#define REAPERAPI_WANT_GetActiveTake
+#define REAPERAPI_WANT_GetSetMediaItemTakeInfo_String
+#define REAPERAPI_WANT_GetMediaItemTakeInfo_Value
+#define REAPERAPI_WANT_GetNumTakeMarkers
+#define REAPERAPI_WANT_GetTakeMarker
+#define REAPERAPI_WANT_SetTakeMarker
+#define REAPERAPI_WANT_DeleteTakeMarker
+#define REAPERAPI_WANT_TimeMap2_timeToQN
 // markers: only to remove the ones older builds created
 #define REAPERAPI_WANT_DeleteProjectMarker
 #define REAPERAPI_WANT_EnumProjectMarkers3

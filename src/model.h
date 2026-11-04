@@ -121,12 +121,14 @@ public:
 
   // serialisation (public for tests)
   static std::string Serialize(const std::vector<LyricBlock>& blocks, double origin);
-  static std::string ItemNotes(const std::vector<LyricBlock>& blocks);   // timeline text of the lyric item
+  struct TakeMark { double pos; std::string label; int color; };   // absolute time
+  static std::vector<TakeMark> BlockMarks(const std::vector<LyricBlock>& blocks);   // what the lyric item shows
   static bool Deserialize(const std::string& s, double origin, std::vector<LyricBlock>& out);
 
 private:
   MediaItem* FindLyricItem() const;
   bool MigrateOldItems();               // pre-sequencer projects: one item per block + markers
+  MediaItem* GiveItemATake(MediaItem* old);   // earlier lyric items had no take
   void Write();                         // model -> lyric item (creates it if needed)
   void RelabelAuto();
   void FixOverlaps();

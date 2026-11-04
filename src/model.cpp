@@ -10,7 +10,6 @@
 
 static const double kEps = 0.0005;
 static const char* kDocKey = "P_EXT:LYRD";
-static const char* kItemName = "Lyrics";
 
 std::string LyricBlock::Text() const
 {
@@ -96,26 +95,65 @@ static void SetItemString(MediaItem* it, const char* key, const std::string& v)
   GetSetMediaItemInfo_String(it, key, b.data(), true);
 }
 
-// What the lyric item shows on the timeline: it has no take, so REAPER draws its notes.
-// One line, block by block: "INTRO: line / line  |  VERSE: line / line".
-std::string LyricDoc::ItemNotes(const std::vector<LyricBlock>& blocks)
+// ------------------------------------------------------------------ the lyric item's take
+// The lyric item holds an empty MIDI take, so REAPER draws (and selects) it like any other
+// item rather than as a text "empty item". Each block is a take marker at its start, named
+// by its label in the block colour: that is all the item shows on the timeline.
+
+static void SetupLyricTake(MediaItem* it)
 {
-  std::string out;
-  for (auto& b : blocks)
+  SetMediaItemInfo_Value(it, "B_LOOPSRC", 0);
+  SetItemString(it, "P_NOTES", "");
+  if (MediaItem_Take* tk = GetActiveTake(it))
   {
-    std::string lines;
-    for (auto& l : b.lines)
-    {
-      std::string t = Trim(l.text);
-      if (t.empty()) continue;
-      if (!lines.empty()) lines += " / ";
-      lines += t;
-    }
-    if (lines.empty()) continue;
-    if (!out.empty()) out += "  |  ";
-    out += b.label.empty() ? lines : b.label + ": " + lines;
+    char empty[1] = "";
+    GetSetMediaItemTakeInfo_String(tk, "P_NAME", empty, true);
   }
-  return out.empty() ? std::string(kItemName) : out;
+}
+
+// Item geometry; a MIDI item is resized through its MIDI source so it covers the whole item.
+static void SetItemExtents(ReaProject* proj, MediaItem* it, double pos, double end)
+{
+  if (GetActiveTake(it) && MIDI_SetItemExtents(it, TimeMap2_timeToQN(proj, pos), TimeMap2_timeToQN(proj, end))
+      && std::fabs(GetMediaItemInfo_Value(it, "D_POSITION") - pos) < 1e-6
+      && std::fabs(GetMediaItemInfo_Value(it, "D_LENGTH") - (end - pos)) < 1e-6) return;
+  SetMediaItemInfo_Value(it, "D_POSITION", pos);
+  SetMediaItemInfo_Value(it, "D_LENGTH", end - pos);
+}
+
+std::vector<LyricDoc::TakeMark> LyricDoc::BlockMarks(const std::vector<LyricBlock>& blocks)
+{
+  std::vector<TakeMark> out;
+  for (auto& b : blocks) out.push_back({ b.start, b.label, b.color });
+  return out;
+}
+
+// Make the take markers match the blocks; touches nothing when they already do.
+static void SyncTakeMarkers(MediaItem* it, const std::vector<LyricDoc::TakeMark>& want)
+{
+  MediaItem_Take* tk = it ? GetActiveTake(it) : nullptr;
+  if (!tk) return;
+  double pos = GetMediaItemInfo_Value(it, "D_POSITION");
+  double offs = GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS");
+  double rate = GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE");
+  if (rate <= 0) rate = 1.0;
+  int have = GetNumTakeMarkers(tk);
+  bool same = have == (int)want.size();
+  for (int i = 0; same && i < have; i++)
+  {
+    char name[512] = ""; int col = 0;
+    double sp = GetTakeMarker(tk, i, name, sizeof(name), &col);
+    double wp = (want[i].pos - pos) * rate + offs;
+    same = std::fabs(sp - wp) < 1e-6 && want[i].label == name && col == want[i].color;
+  }
+  if (same) return;
+  for (int i = have - 1; i >= 0; i--) DeleteTakeMarker(tk, i);
+  for (auto& m : want)
+  {
+    double sp = (m.pos - pos) * rate + offs;
+    int col = m.color;
+    SetTakeMarker(tk, -1, m.label.c_str(), &sp, &col);
+  }
 }
 
 // Times are stored as integer microseconds relative to the item start: no locale-dependent
@@ -445,7 +483,10 @@ void LyricDoc::Write()
   bool created = false;
   if (!item || !ValidatePtr2(proj, item, "MediaItem*") || GetMediaItem_Track(item) != track)
   {
-    item = AddMediaItemToTrack(track);
+    double s = blocks.front().start, e = blocks.back().end;
+    item = CreateNewMIDIItemInProj(track, s, e > s ? e : s + DefaultBlockLen(), nullptr);
+    if (!item) return;
+    SetupLyricTake(item);
     m_itemPos = blocks.front().start; m_itemLen = 0; m_tail = 0;
     m_written.clear();
     created = true;
@@ -455,14 +496,11 @@ void LyricDoc::Write()
   double end = blocks.back().end + m_tail;
   std::string doc = Serialize(blocks, pos);
   PreventUIRefresh(1);
-  if (created) SetItemString(item, "P_NAME", kItemName);
-  if (doc != m_written || created)
-  {
-    SetItemString(item, kDocKey, doc);
-    SetItemString(item, "P_NOTES", ItemNotes(blocks));
-  }
-  if (created || std::fabs(GetMediaItemInfo_Value(item, "D_POSITION") - pos) > 1e-9) SetMediaItemInfo_Value(item, "D_POSITION", pos);
-  if (created || std::fabs(GetMediaItemInfo_Value(item, "D_LENGTH") - (end - pos)) > 1e-9) SetMediaItemInfo_Value(item, "D_LENGTH", end - pos);
+  if (doc != m_written || created) SetItemString(item, kDocKey, doc);
+  if (created || std::fabs(GetMediaItemInfo_Value(item, "D_POSITION") - pos) > 1e-9
+      || std::fabs(GetMediaItemInfo_Value(item, "D_LENGTH") - (end - pos)) > 1e-9)
+    SetItemExtents(proj, item, pos, end);
+  SyncTakeMarkers(item, BlockMarks(blocks));
   PreventUIRefresh(-1);
   m_written = doc; m_itemPos = pos; m_itemLen = end - pos;
   UpdateArrange();
@@ -568,6 +606,30 @@ bool LyricDoc::MigrateOldItems()
   return true;
 }
 
+// Lyric items from earlier builds were empty items (no take): REAPER drew them as text items
+// labelled "Empty Item". Swap one for an empty MIDI item holding the same document.
+MediaItem* LyricDoc::GiveItemATake(MediaItem* old)
+{
+  double pos = GetMediaItemInfo_Value(old, "D_POSITION");
+  double len = GetMediaItemInfo_Value(old, "D_LENGTH");
+  std::string doc = ItemString(old, kDocKey);
+  Undo_BeginBlock2(proj);
+  PreventUIRefresh(1);
+  MediaItem* n = CreateNewMIDIItemInProj(track, pos, pos + len, nullptr);
+  if (n)
+  {
+    SetupLyricTake(n);
+    SetItemExtents(proj, n, pos, pos + len);
+    SetItemString(n, kDocKey, doc);
+    SetMediaItemInfo_Value(n, "B_UISEL", GetMediaItemInfo_Value(old, "B_UISEL"));
+    DeleteTrackMediaItem(track, old);
+  }
+  PreventUIRefresh(-1);
+  Undo_EndBlock2(proj, "Lyrics: update lyric item", -1);
+  UpdateArrange();
+  return n ? n : old;
+}
+
 bool LyricDoc::SyncFromReaper()
 {
   if (!ValidateTrack()) return true;
@@ -582,6 +644,7 @@ bool LyricDoc::SyncFromReaper()
     lastStateCount = GetProjectStateChangeCount(proj);
     return migrated || oldCount != 0;
   }
+  if (!GetActiveTake(it)) it = GiveItemATake(it);
   double pos = GetMediaItemInfo_Value(it, "D_POSITION");
   double len = GetMediaItemInfo_Value(it, "D_LENGTH");
   std::string doc = ItemString(it, kDocKey);
@@ -606,9 +669,7 @@ bool LyricDoc::SyncFromReaper()
       needWrite = true;
     }
     else if (std::fabs(pos - blocks.front().start) > kEps) needWrite = true;
-    // lyric items from earlier builds have no notes yet (undo/redo restores them with the item)
-    std::string notes = ItemNotes(blocks);
-    if (ItemString(it, "P_NOTES") != notes) SetItemString(it, "P_NOTES", notes);
+    SyncTakeMarkers(it, BlockMarks(blocks));   // undo/redo restores them with the item; this is a no-op then
   }
   else
   {
