@@ -1,5 +1,6 @@
 #include "util.h"
 #include "api.h"
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 
@@ -148,6 +149,106 @@ std::vector<std::pair<int, int>> LcsMatch(const std::vector<std::string>& a, con
     if (a[i] == b[j]) { out.push_back({ i, j }); i++; j++; }
     else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
     else j++;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- lyric text
+
+std::string CanonicalText(const std::vector<std::string>& lines)
+{
+  std::string out; bool open = false;
+  for (auto& l : lines)
+  {
+    if (Trim(l).empty()) { open = false; continue; }
+    if (!out.empty()) out += open ? "\n" : "\n\n";
+    out += l; open = true;
+  }
+  return out;
+}
+
+int CountParagraphs(const std::vector<std::string>& lines, int upTo)
+{
+  int n = 0; bool open = false;
+  for (int i = 0; i < upTo && i < (int)lines.size(); i++)
+  {
+    if (Trim(lines[i]).empty()) open = false;
+    else if (!open) { n++; open = true; }
+  }
+  return n;
+}
+
+std::string StripCR(const std::string& s)
+{
+  std::string o;
+  for (char c : s) if (c != '\r') o += c;
+  return o;
+}
+
+std::vector<CopiedBlock> CopiedBlocks(const std::vector<std::string>& lines, const std::vector<std::pair<int, int>>& spans,
+                                      const std::vector<std::string>& blockTexts, int aLine, int aCol, int bLine, int bCol)
+{
+  std::vector<CopiedBlock> out;
+  for (size_t i = 0; i < spans.size() && i < blockTexts.size(); i++)
+  {
+    int first = spans[i].first, last = spans[i].second;
+    if (last < aLine || first > bLine) continue;
+    std::vector<std::string> part;
+    for (int ln = std::max(first, aLine); ln <= std::min(last, bLine) && ln < (int)lines.size(); ln++)
+    {
+      const std::string& s = lines[ln];
+      int c0 = ln == aLine ? std::min(aCol, (int)s.size()) : 0;
+      int c1 = ln == bLine ? std::min(bCol, (int)s.size()) : (int)s.size();
+      part.push_back(c1 > c0 ? s.substr(c0, c1 - c0) : std::string());
+    }
+    std::string copied = CanonicalText(part);
+    if (copied.empty()) continue;
+    out.push_back({ (int)i, copied == blockTexts[i] });
+  }
+  return out;
+}
+
+bool PrepareBlockPaste(const std::vector<std::string>& lines, int caretLine, std::string& text, int* firstPara)
+{
+  if (caretLine < 0 || caretLine >= (int)lines.size() || !Trim(lines[caretLine]).empty()) return false;   // inside a block
+  size_t s = 0, e = text.size();
+  while (s < e && text[s] == '\n') s++;
+  while (e > s && text[e - 1] == '\n') e--;
+  if (s >= e) return false;
+  text = text.substr(s, e - s);
+  // keep the pasted paragraphs apart from the blocks around the clean line
+  if (caretLine > 0 && !Trim(lines[caretLine - 1]).empty()) text = "\n" + text;
+  if (caretLine + 1 < (int)lines.size() && !Trim(lines[caretLine + 1]).empty()) text += "\n";
+  *firstPara = CountParagraphs(lines, caretLine);
+  return true;
+}
+
+int DragInsertIndex(const std::vector<std::pair<int, int>>& spans, int dragged, int ghostMid)
+{
+  int n = (int)spans.size();
+  if (dragged < 0 || dragged >= n) return -1;
+  int above = 0;   // other blocks whose middle is above the ghost
+  for (int j = 0; j < n; j++)
+    if (j != dragged && ghostMid > (spans[j].first + spans[j].second) / 2) above++;
+  return above <= dragged ? above : above + 1;
+}
+
+std::vector<int> DragShuntTargets(const std::vector<int>& heights, int dragged, int to, int y0, int* slotY)
+{
+  int n = (int)heights.size();
+  std::vector<int> out(n, y0);
+  if (dragged < 0 || dragged >= n) return out;
+  if (to < 0) to = dragged;
+  std::vector<int> order;
+  for (int j = 0; j < n; j++) if (j != dragged) order.push_back(j);
+  int at = to > dragged ? to - 1 : to;
+  order.insert(order.begin() + std::max(0, std::min(at, (int)order.size())), dragged);
+  int y = y0;
+  for (int j : order)
+  {
+    out[j] = y;
+    if (j == dragged && slotY) *slotY = y;
+    y += heights[j];
   }
   return out;
 }

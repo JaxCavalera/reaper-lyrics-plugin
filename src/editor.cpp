@@ -25,7 +25,8 @@ static const COLORREF kAccent = RGB(74, 144, 217);
 
 enum { BTN_TRACKSEL = 1, BTN_TRACK, BTN_PANEL, BTN_ZOOM_OUT, BTN_ZOOM_IN, BTN_ZOOM_FIT };
 enum { MENU_RENAME = 1, MENU_DELETE, MENU_GOTO, MENU_LABEL_PRESET = 10, MENU_LABEL_AUTO = 30, MENU_COLOR_PRESET = 40, MENU_COLOR_CUSTOM = 60, MENU_COLOR_AUTO, MENU_TRACK = 100,
-       MENU_RESTYLE = 900, MENU_LAYOUT_AUTO, MENU_LAYOUT_DEFAULT, MENU_LAYOUT = 1000 };
+       MENU_RESTYLE = 900, MENU_LAYOUT_AUTO, MENU_LAYOUT_DEFAULT, MENU_LAYOUT = 1000,
+       MENU_TEXT_CUT = 1300, MENU_TEXT_COPY, MENU_TEXT_PASTE, MENU_TEXT_SELALL };
 
 struct ColorPreset { const char* name; COLORREF c; };
 static const ColorPreset kColors[] = {
@@ -94,6 +95,8 @@ void LyricEditor::Create()
   m_text.onBeforeNewline = [this] { OnBeforeNewline(); };
   m_text.onScroll = [this] { Invalidate(); };
   m_text.paintBackground = [this](HDC dc) { PaintTextBackground(dc); };
+  m_text.onCopy = [this](const std::string& s, TEPos a, TEPos b) { OnCopy(s, a, b); };
+  m_text.onPaste = [this](std::string& s) { OnPaste(s); };
   m_rename.SetParent(m_hwnd); m_rename.SetFont(m_fontChip);
   m_rename.colBg = RGB(250, 250, 250); m_rename.colFg = RGB(20, 20, 20); m_rename.colCaret = RGB(20, 20, 20); m_rename.colSel = RGB(170, 200, 240);
   m_rename.onEnterSingle = [this] { CommitRename(true); };
@@ -185,16 +188,64 @@ void LyricEditor::RebuildLayout()
   if (m_layout.empty() && g_doc.IsBound() && g_doc.blocks.size() == 1) m_layout.push_back(Layout());
 }
 
-static std::string CanonicalText(const std::vector<std::string>& lines)
+
+// ------------------------------------------------------------------ copy / paste
+
+// Remember which blocks the copied text came from: one entry per paragraph of the copied
+// text, with that block's label/colour (and its timing when the whole block was copied).
+void LyricEditor::OnCopy(const std::string& text, TEPos a, TEPos b)
 {
-  std::string out; bool open = false;
-  for (auto& l : lines)
-  {
-    if (Trim(l).empty()) { open = false; continue; }
-    if (!out.empty()) out += open ? "\n" : "\n\n";
-    out += l; open = true;
-  }
-  return out;
+  m_clipText.clear(); m_clipBlocks.clear();
+  if (!g_doc.IsBound() || m_layout.size() != g_doc.blocks.size()) return;
+  std::vector<std::pair<int, int>> spans;
+  std::vector<std::string> texts;
+  for (size_t i = 0; i < m_layout.size(); i++) { spans.push_back({ m_layout[i].first, m_layout[i].last }); texts.push_back(g_doc.blocks[i].Text()); }
+  std::vector<PastedBlock> got;
+  for (auto& c : CopiedBlocks(m_text.Lines(), spans, texts, a.line, a.col, b.line, b.col))
+    got.push_back(PastedBlock::From(g_doc.blocks[c.block], c.whole));
+  std::string clip = StripCR(text);
+  std::vector<std::string> clipLines = SplitLines(clip);
+  if (got.empty() || (int)got.size() != CountParagraphs(clipLines, (int)clipLines.size())) return;
+  m_clipText = clip; m_clipBlocks = got;
+}
+
+// Pasting text copied from blocks: on a clean line (an empty line, outside every block) the
+// pasted paragraphs become blocks with their labels/colours; anywhere else only the text is
+// pasted, like any other text.
+void LyricEditor::OnPaste(std::string& text)
+{
+  m_pendingPaste.clear();
+  text = StripCR(text);
+  if (!g_doc.IsBound() || m_clipBlocks.empty() || text != m_clipText || m_text.HasSelection()) return;
+  int first = 0;
+  if (!PrepareBlockPaste(m_text.Lines(), m_text.Caret().line, text, &first)) return;
+  m_pendingPaste = m_clipBlocks;
+  for (size_t k = 0; k < m_pendingPaste.size(); k++) m_pendingPaste[k].para = first + (int)k;
+}
+
+void LyricEditor::ShowTextMenu(int x, int y)
+{
+  m_text.SetFocus(true);
+  m_text.ContextClick(x, y);
+  Invalidate();
+  bool sel = m_text.HasSelection();
+  bool any = false;
+  for (auto& l : m_text.Lines()) if (!l.empty()) { any = true; break; }
+  HMENU m = CreatePopupMenu();
+  AddMenu(m, MF_STRING | (sel ? 0 : MF_GRAYED), MENU_TEXT_CUT, "Cut\tCtrl+X");
+  AddMenu(m, MF_STRING | (sel ? 0 : MF_GRAYED), MENU_TEXT_COPY, "Copy\tCtrl+C");
+  AddMenu(m, MF_STRING | (m_text.CanPaste() ? 0 : MF_GRAYED), MENU_TEXT_PASTE, "Paste\tCtrl+V");
+  AddMenu(m, MF_SEPARATOR, 0, nullptr);
+  AddMenu(m, MF_STRING | (any ? 0 : MF_GRAYED), MENU_TEXT_SELALL, "Select all\tCtrl+A");
+  POINT pt = { x, y }; ClientToScreen(m_hwnd, &pt);
+  int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_NONOTIFY, pt.x, pt.y, 0, m_hwnd, nullptr);
+  DestroyMenu(m);
+  if (cmd == MENU_TEXT_CUT) m_text.CutSelection();
+  else if (cmd == MENU_TEXT_COPY) m_text.CopySelection();
+  else if (cmd == MENU_TEXT_PASTE) m_text.PasteClipboard();
+  else if (cmd == MENU_TEXT_SELALL) m_text.SelectAll();
+  SetFocus(m_hwnd);
+  Invalidate();
 }
 
 void LyricEditor::CaretInfo(int* block, int* line, int* col)
@@ -241,7 +292,8 @@ void LyricEditor::OnEditChanged()
   RebuildLayout();
   if (g_doc.IsBound())
   {
-    g_doc.ApplyText(CanonicalText(m_text.Lines()), m_tracking ? &m_live : nullptr);
+    std::vector<PastedBlock> pasted; pasted.swap(m_pendingPaste);
+    g_doc.ApplyText(CanonicalText(m_text.Lines()), m_tracking ? &m_live : nullptr, pasted.empty() ? nullptr : &pasted);
     if (g_doc.blocks.size() != m_layout.size()) RefreshText();
   }
   UpdateStatus();
@@ -279,6 +331,17 @@ void LyricEditor::OnBeforeNewline()
 
 void LyricEditor::OnTimer()
 {
+  if (DragActive())   // labels slide towards their places while one is dragged
+  {
+    bool moved = false;
+    for (size_t i = 0; i < m_animY.size(); i++)
+    {
+      double d = m_dragTarget[i] - m_animY[i];
+      if (std::fabs(d) > 0.5) { m_animY[i] += d * 0.35; moved = true; }
+      else m_animY[i] = m_dragTarget[i];
+    }
+    if (moved) Invalidate();
+  }
   if (g_doc.IsBound() && !g_doc.ValidateTrack())
   {
     m_trackName.clear();
@@ -425,17 +488,30 @@ void LyricEditor::PaintGutter(HDC dc)
   int lh = m_text.LineH(), w = m_gutter.right;
   int first = m_text.FirstVisibleLine(), lastVis = first + m_text.VisibleLines();
   HGDIOBJ oldFont = SelectObject(dc, m_fontChip);
+  // while a label is dragged the other blocks' labels slide (m_animY) to where they will end
+  // up, and the dragged one follows the mouse as a see-through ghost
+  bool drag = DragActive();
   for (size_t i = 0; i < m_layout.size(); i++)
   {
     const Layout& L = m_layout[i];
-    if (L.last < first || L.first >= lastVis) continue;
-    int y1 = m_text.LineY(L.first), y2 = m_text.LineY(L.last) + lh;
-    bool cur = (int)i == m_curBlock;
+    if (drag && (int)i == m_dragBlock) continue;
+    int y1, y2;
+    if (drag)
+    {
+      y1 = (int)std::floor(m_animY[i] + 0.5); y2 = y1 + (L.last - L.first + 1) * lh;
+      if (y2 < m_gutter.top || y1 > m_gutter.bottom) continue;
+    }
+    else
+    {
+      if (L.last < first || L.first >= lastVis) continue;
+      y1 = m_text.LineY(L.first); y2 = m_text.LineY(L.last) + lh;
+    }
+    bool cur = !drag && (int)i == m_curBlock;
     COLORREF c = i < g_doc.blocks.size() ? NativeToColorref(g_doc.blocks[i].color) : RGB(90, 90, 90);
     std::string label = i < g_doc.blocks.size() ? g_doc.blocks[i].label : "";
     RECT bar = { w - 10, std::max((int)m_gutter.top, y1), w - 5, std::min((int)m_gutter.bottom, y2) };
     if (bar.bottom > bar.top) FillRectColor(dc, bar, cur ? c : Blend(c, kGutterBg, 0.45));
-    if (L.first >= first)
+    if (drag ? y1 >= m_gutter.top : L.first >= first)
     {
       RECT chip = { 6, y1 + 1, w - 16, y1 + lh - 1 };
       RoundRectColor(dc, chip, c, 6);
@@ -467,14 +543,35 @@ void LyricEditor::PaintGutter(HDC dc)
       }
     }
   }
-  if (m_dragging && m_dropIndex >= 0 && !m_layout.empty())
+  if (drag && m_dragBlock < (int)g_doc.blocks.size())
   {
-    int y = m_dropIndex < (int)m_layout.size() ? m_text.LineY(m_layout[m_dropIndex].first) - 1 : m_text.LineY(m_layout.back().last) + lh + 1;
-    if (y >= m_gutter.top && y <= m_gutter.bottom)
+    const LyricBlock& db = g_doc.blocks[m_dragBlock];
+    COLORREF c = NativeToColorref(db.color);
+    // the gap it will drop into: an outline where its label lands
+    int sy = m_dragSlotY;
+    if (sy >= m_gutter.top && sy + lh <= m_gutter.bottom)
     {
-      RECT line = { 2, y - 1, w - 2, y + 2 };
-      FillRectColor(dc, line, RGB(255, 255, 255));
+#ifdef PS_DOT
+      HPEN p = CreatePen(PS_DOT, 1, Blend(c, kGutterBg, 0.2));
+#else
+      HPEN p = CreatePen(PS_SOLID, 1, Blend(c, kGutterBg, 0.5));   // SWELL: no dotted pens
+#endif
+      HGDIOBJ op = SelectObject(dc, p); HGDIOBJ ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
+      RoundRect(dc, 6, sy + 1, w - 15, sy + lh, 6, 6);
+      SelectObject(dc, op); SelectObject(dc, ob); DeleteObject(p);
     }
+    // the ghost under the mouse
+    int gy = std::max((int)m_gutter.top, std::min((int)m_gutter.bottom - lh, m_dragY - m_dragGrab));
+    COLORREF gc = Blend(c, kGutterBg, 0.45);
+    RECT chip = { 6, gy + 1, w - 16, gy + lh - 1 };
+    RoundRectColor(dc, chip, gc, 6);
+    HPEN p = CreatePen(PS_SOLID, 1, Blend(c, RGB(255, 255, 255), 0.3));
+    HGDIOBJ op = SelectObject(dc, p); HGDIOBJ ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    RoundRect(dc, chip.left, chip.top, chip.right + 1, chip.bottom + 1, 6, 6);
+    SelectObject(dc, op); SelectObject(dc, ob); DeleteObject(p);
+    SetTextColor(dc, Blend(IsLightColor(c) ? RGB(20, 20, 20) : RGB(250, 250, 250), gc, 0.3));
+    RECT tr = { chip.left + 8, chip.top, chip.right - 18, chip.bottom };
+    DrawTextU8(dc, db.label, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
   }
   if (!g_doc.IsBound())
   {
@@ -917,19 +1014,32 @@ int LyricEditor::BlockAtY(int y)
   return -1;
 }
 
+// Insertion index (in the current order) for the dragged label: it goes before the first
+// other block whose middle is below the middle of the ghost.
 int LyricEditor::DropIndexAtY(int y)
 {
-  int lh = m_text.LineH(), best = 0, bestD = 1 << 30;
-  for (size_t i = 0; i <= m_layout.size(); i++)
-  {
-    int by;
-    if (i < m_layout.size()) by = m_text.LineY(m_layout[i].first);
-    else if (!m_layout.empty()) by = m_text.LineY(m_layout.back().last) + lh;
-    else by = 0;
-    int d = abs(by - y);
-    if (d < bestD) { bestD = d; best = (int)i; }
-  }
-  return best;
+  int lh = m_text.LineH();
+  std::vector<std::pair<int, int>> spans;
+  for (auto& L : m_layout) spans.push_back({ m_text.LineY(L.first), m_text.LineY(L.last) + lh });
+  return DragInsertIndex(spans, m_dragBlock, y - m_dragGrab + lh / 2);
+}
+
+bool LyricEditor::DragActive() const
+{
+  return m_dragging && m_dragBlock >= 0 && m_dragBlock < (int)m_layout.size()
+      && m_animY.size() == m_layout.size() && m_dragTarget.size() == m_layout.size();
+}
+
+// Where every label goes if the dragged block were dropped now: the blocks are laid out in
+// the new order (each one its lines plus the blank line after it), so the others shunt up or
+// down to leave a gap the size of the dragged block.
+void LyricEditor::UpdateDragTargets()
+{
+  int n = (int)m_layout.size(), k = m_dragBlock, lh = m_text.LineH();
+  if (k < 0 || k >= n) return;
+  std::vector<int> heights;   // each block: its lines plus the blank line after it
+  for (auto& L : m_layout) heights.push_back((L.last - L.first + 2) * lh);
+  m_dragTarget = DragShuntTargets(heights, k, m_dropIndex, m_text.LineY(m_layout[0].first), &m_dragSlotY);
 }
 
 int LyricEditor::ButtonAt(int x, int y)
@@ -1212,8 +1322,14 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (m_textCapture) { if (m_text.OnMouse(msg, wp, x, y)) Invalidate(); return 1; }
     if (m_dragBlock >= 0 && GetCapture() == h)
     {
-      if (!m_dragging && abs(y - m_dragStart.y) > 4) m_dragging = true;
-      if (m_dragging) { m_dropIndex = DropIndexAtY(y); Invalidate(); }
+      if (!m_dragging && abs(y - m_dragStart.y) > 4 && m_dragBlock < (int)m_layout.size())
+      {
+        m_dragging = true;
+        m_dragGrab = m_dragStart.y - m_text.LineY(m_layout[m_dragBlock].first);
+        m_animY.clear();
+        for (auto& L : m_layout) m_animY.push_back(m_text.LineY(L.first));
+      }
+      if (m_dragging) { m_dragY = y; m_dropIndex = DropIndexAtY(y); UpdateDragTargets(); Invalidate(); }
       return 1;
     }
     return 0;
@@ -1228,6 +1344,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (m_dragging)
     {
       m_dragging = false;
+      m_animY.clear(); m_dragTarget.clear();
       int to = m_dropIndex; m_dropIndex = -1;
       if (block >= 0 && to >= 0 && to != block && to != block + 1) { g_doc.MoveBlock(block, to); RefreshText(); }
       Invalidate();
@@ -1253,6 +1370,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
       if (b >= 0) { POINT pt = { x, y }; ClientToScreen(h, &pt); ShowBlockMenu(b, pt); }
       return 1;
     }
+    if (!m_renaming && m_text.HitTest(x, y)) { ShowTextMenu(x, y); return 1; }
     return 0;
   }
   case WM_MOUSEWHEEL:

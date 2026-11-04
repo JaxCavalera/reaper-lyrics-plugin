@@ -33,6 +33,21 @@ struct LyricBlock
   double Len() const { return end - start; }
 };
 
+// A block copied in the editor, pasted on a clean line (outside every block): the pasted
+// paragraph becomes a block with the same label and colour; a whole copied block also keeps
+// its length and line timing.
+struct PastedBlock
+{
+  int para = 0;                 // paragraph index in the text passed to ApplyText
+  std::string label;
+  int color = 0;
+  bool whole = false;           // the entire block was copied (not just some of its lines)
+  bool autoLen = false;
+  double len = 0;
+  std::vector<double> offsets;  // line positions relative to the block start
+  static PastedBlock From(const LyricBlock& b, bool whole);
+};
+
 // Filled by the editor when the user hits Return while tracking + playing.
 struct LiveContext
 {
@@ -67,7 +82,8 @@ public:
   bool NeedsSync() const;
 
   // Editor text -> model -> REAPER. Text edits get one coalesced undo point (FlushUndo).
-  void ApplyText(const std::string& utf8, LiveContext* live);
+  // pasted: paragraphs that were pasted on a clean line with their block data (else nullptr)
+  void ApplyText(const std::string& utf8, LiveContext* live, const std::vector<PastedBlock>* pasted = nullptr);
   std::string ToText() const;
   void FlushUndo(bool force = false);   // call from a timer: adds the undo point after typing pauses
 

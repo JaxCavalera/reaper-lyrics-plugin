@@ -697,7 +697,15 @@ void LyricDoc::DiffLines(LyricBlock& b, const std::vector<std::string>& newLines
   NormaliseLines(b);
 }
 
-void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live)
+PastedBlock PastedBlock::From(const LyricBlock& b, bool whole)
+{
+  PastedBlock p;
+  p.label = b.label; p.color = b.color; p.whole = whole; p.autoLen = b.autoLen; p.len = b.Len();
+  for (auto& l : b.lines) p.offsets.push_back(l.pos - b.start);
+  return p;
+}
+
+void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live, const std::vector<PastedBlock>* pasted)
 {
   if (!ValidateTrack()) return;
   auto paras = ParseParagraphs(utf8);
@@ -710,21 +718,29 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live)
   if (oldTexts == newTexts) return;
 
   std::vector<LyricBlock> old = blocks;
-  auto matches = LcsMatch(oldTexts, newTexts);
 
-  struct Slot { LyricBlock blk; bool isNew = false; bool exists = false; std::vector<std::string> lines; };
+  struct Slot { LyricBlock blk; bool isNew = false; bool exists = false; std::vector<std::string> lines; const PastedBlock* paste = nullptr; };
   std::vector<Slot> slots(paras.size());
-  for (auto& m : matches) { slots[m.second].blk = old[m.first]; slots[m.second].exists = true; }
+  // pasted paragraphs are always new blocks: keep them out of the matching, so a pasted copy
+  // never takes over the timing of the block it was copied from
+  if (pasted)
+    for (auto& p : *pasted)
+      if (p.para >= 0 && p.para < (int)slots.size()) { slots[p.para].paste = &p; slots[p.para].isNew = true; }
+  std::vector<int> keep;   // paragraph indices that are matched against the old blocks
+  std::vector<std::string> keepTexts;
+  for (size_t i = 0; i < paras.size(); i++) if (!slots[i].paste) { keep.push_back((int)i); keepTexts.push_back(newTexts[i]); }
+  auto matches = LcsMatch(oldTexts, keepTexts);
+  for (auto& m : matches) { slots[keep[m.second]].blk = old[m.first]; slots[keep[m.second]].exists = true; }
   std::vector<std::pair<int, int>> bounds = matches;
-  bounds.push_back({ (int)old.size(), (int)paras.size() });
+  bounds.push_back({ (int)old.size(), (int)keep.size() });
   int deleted = 0;
   size_t oi = 0, ni = 0;
   for (auto& m : bounds)
   {
     size_t oe = m.first, ne = m.second;
-    while (oi < oe && ni < ne) { slots[ni].blk = old[oi]; slots[ni].exists = true; oi++; ni++; }
+    while (oi < oe && ni < ne) { slots[keep[ni]].blk = old[oi]; slots[keep[ni]].exists = true; oi++; ni++; }
     while (oi < oe) { deleted++; oi++; }
-    while (ni < ne) { slots[ni].isNew = true; ni++; }
+    while (ni < ne) { slots[keep[ni]].isNew = true; ni++; }
     oi = oe + 1; ni = ne + 1;
   }
   for (size_t i = 0; i < slots.size(); i++) slots[i].lines = paras[i];
@@ -745,6 +761,37 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live)
     {
       LyricBlock nb;
       double len = LineSlot() * (double)std::max<size_t>(1, s.lines.size());
+      const PastedBlock* pb = s.paste;
+      if (pb)
+      {
+        // pasted on a clean line: same label and colour (kept for good); a whole block also
+        // keeps its length and line timing. Placed like any new block.
+        nb.label = pb->label; nb.customLabel = true;
+        nb.color = pb->color; nb.customColor = true;
+        bool keepTiming = pb->whole && pb->len > kEps && pb->offsets.size() == s.lines.size();
+        if (keepTiming) len = pb->len;
+        if (prev) nb.start = prev->end;
+        else if (old.size() == 1 && old[0].Text().empty()) nb.start = old[0].start;   // replaces the empty first block
+        else if (next) nb.start = std::max(0.0, next->start - len);
+        else nb.start = GetCursorPositionEx(proj);
+        if (keepTiming)
+        {
+          nb.autoLen = pb->autoLen;
+          nb.end = nb.start + pb->len;
+          for (size_t k = 0; k < s.lines.size(); k++) { LyricLine l; l.text = s.lines[k]; l.pos = nb.start + pb->offsets[k]; nb.lines.push_back(l); }
+          NormaliseLines(nb);
+        }
+        else
+        {
+          nb.autoLen = true;
+          nb.end = nb.start + len;
+          LyricBlock empty = nb;
+          DiffLines(empty, s.lines, nullptr, next);
+          nb.lines = empty.lines;
+        }
+        result.push_back(nb);
+        continue;
+      }
       if (live && live->valid && (GetTickCount() - live->stamp < 20000) && (!prev || live->pos >= prev->start) && (!next || live->pos < next->start))
       {
         // live typing: the block starts at the stamped play position
@@ -823,6 +870,10 @@ void LyricDoc::MoveBlock(int from, int to)
     for (auto& l : b.lines) l.pos += d;
     t = b.end;
   }
+  // labels travel with their blocks: reordering never renames or recolours anything. A block
+  // whose automatic label would change in its new place keeps the label it has now.
+  for (int i = 0; i < n; i++)
+    if (!blocks[i].customLabel && AutoLabel(i, n) != blocks[i].label) { blocks[i].customLabel = true; blocks[i].customColor = true; }
   RelabelAuto();
   FixOverlaps();
   Write();

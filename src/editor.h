@@ -44,10 +44,15 @@ private:
   void PaintTextBackground(HDC dc);
   int BlockAtY(int y);
   int DropIndexAtY(int y);
+  bool DragActive() const;
+  void UpdateDragTargets();
   int ButtonAt(int x, int y);
   void OnButton(int id);
   void ShowBlockMenu(int block, POINT screenPt);
   void ShowTrackMenu(POINT screenPt);
+  void ShowTextMenu(int x, int y);                 // right-click in the lyric text
+  void OnCopy(const std::string& text, TEPos from, TEPos to);
+  void OnPaste(std::string& text);
   void BeginRename(int block);
   bool OnChipGrip(int block, int x, int y) const;
   static DWORD DoubleClickMs();
@@ -87,9 +92,16 @@ private:
   int m_curBlock = -1, m_curLine = -1, m_scrolledBlock = -1;
   int m_dragBlock = -1, m_dropIndex = -1; POINT m_dragStart = { 0, 0 }; bool m_dragging = false;
   bool m_textCapture = false;
+  // label drag: where each label is drawn (sliding towards m_dragTarget), the landing slot of
+  // the dragged one, the mouse y and where on its label it was grabbed
+  std::vector<double> m_animY; std::vector<int> m_dragTarget;
+  int m_dragSlotY = 0, m_dragY = 0, m_dragGrab = 0;
   int m_chipClickBlock = -1; DWORD m_chipClickTick = 0; POINT m_chipClickPt = { 0, 0 };   // double-click on a label
   unsigned long m_lastTrackScan = 0;
   LiveContext m_live;
+  // copy/paste with block data: the last text copied in the editor and the blocks it came
+  // from (one per paragraph); filled in by a paste on a clean line for the next ApplyText
+  std::string m_clipText; std::vector<PastedBlock> m_clipBlocks, m_pendingPaste;
 
   double m_viewStart = 0, m_pxPerSec = 40;
   bool m_needFit = true;

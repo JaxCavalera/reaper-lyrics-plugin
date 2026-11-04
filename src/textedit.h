@@ -40,6 +40,15 @@ public:
   void StartParagraphAtEnd();   // caret on a fresh line after a blank separator (or line 0 if empty)
   bool HasSelection() const { return !(m_caret == m_anchor); }
 
+  // clipboard (keyboard shortcuts and the right-click menu both go through these)
+  void CopySelection();
+  void CutSelection();
+  void PasteClipboard();
+  bool CanPaste() const;
+  bool ReadOnly() const { return m_readOnly; }
+  // right-click: a click outside the selection moves the caret there first
+  void ContextClick(int x, int y);
+
   void Paint(HDC dc);
   bool OnMouse(UINT msg, WPARAM wp, int x, int y);    // true if consumed
   bool OnKey(UINT msg, WPARAM wp, LPARAM lp);          // true if consumed
@@ -55,6 +64,10 @@ public:
   std::function<void(HDC)> paintBackground; // called after background fill, before text
   std::function<void()> onEscape;
   std::function<void()> onEnterSingle;     // single-line mode: Return pressed
+  // copy / cut: the copied text and the selection it came from (before a cut deletes it)
+  std::function<void(const std::string& text, TEPos from, TEPos to)> onCopy;
+  // paste: may adjust the text before it is inserted (called with the caret/selection as-is)
+  std::function<void(std::string& text)> onPaste;
 
   COLORREF colBg = RGB(30, 30, 30), colFg = RGB(222, 222, 222), colSel = RGB(60, 90, 140), colCaret = RGB(255, 255, 255);
   int m_padX = 10, m_padY = 6;

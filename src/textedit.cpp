@@ -180,6 +180,43 @@ void TextEdit::InsertText(const std::string& raw)
   Changed();
 }
 
+void TextEdit::CopySelection()
+{
+  std::string s = SelectedText();
+  ClipboardSetText(m_parent, s);
+  TEPos a, b; SelRange(&a, &b);
+  if (onCopy && HasSelection()) onCopy(s, a, b);
+}
+
+void TextEdit::CutSelection()
+{
+  if (!HasSelection()) return;
+  CopySelection();
+  if (m_readOnly) return;
+  PushUndo(3); DeleteSelection(); Changed();
+}
+
+bool TextEdit::CanPaste() const
+{
+  return !m_readOnly && !ClipboardGetText(m_parent).empty();
+}
+
+void TextEdit::ContextClick(int x, int y)
+{
+  TEPos p = PosFromPoint(x, y);
+  TEPos a, b; SelRange(&a, &b);
+  bool inside = HasSelection() && !(p < a) && !(b < p);
+  if (!inside) { m_caret = m_anchor = p; m_preferredX = -1; }
+}
+
+void TextEdit::PasteClipboard()
+{
+  if (m_readOnly) return;
+  std::string s = ClipboardGetText(m_parent);
+  if (onPaste) onPaste(s);
+  if (!s.empty()) InsertText(s);
+}
+
 void TextEdit::InsertCodepoint(unsigned cp)
 {
   std::string s; Utf8Append(s, cp);
@@ -499,8 +536,8 @@ bool TextEdit::HandleVK(int vk, bool shift, bool ctrl)
   case VK_PRIOR: Page(-1, shift); return true;
   case VK_NEXT:  Page(1, shift); return true;
   case VK_BACK:  Backspace(); return true;
-  case VK_DELETE: if (shift) { ClipboardSetText(m_parent, SelectedText()); DeleteSelection(); Changed(); } else DeleteForward(); return true;
-  case VK_INSERT: if (ctrl) ClipboardSetText(m_parent, SelectedText()); else if (shift) InsertText(ClipboardGetText(m_parent)); return true;
+  case VK_DELETE: if (shift) CutSelection(); else DeleteForward(); return true;
+  case VK_INSERT: if (ctrl) CopySelection(); else if (shift) PasteClipboard(); return true;
   case VK_RETURN:
     if (m_single) { if (onEnterSingle) onEnterSingle(); }
     else Newline();
@@ -508,9 +545,9 @@ bool TextEdit::HandleVK(int vk, bool shift, bool ctrl)
   case VK_ESCAPE: if (onEscape) onEscape(); return true;
   case VK_TAB: return true;
   case 'A': if (ctrl) { SelectAll(); return true; } break;
-  case 'C': if (ctrl) { ClipboardSetText(m_parent, SelectedText()); return true; } break;
-  case 'X': if (ctrl) { ClipboardSetText(m_parent, SelectedText()); if (!m_readOnly && HasSelection()) { PushUndo(3); DeleteSelection(); Changed(); } return true; } break;
-  case 'V': if (ctrl) { InsertText(ClipboardGetText(m_parent)); return true; } break;
+  case 'C': if (ctrl) { CopySelection(); return true; } break;
+  case 'X': if (ctrl) { CutSelection(); return true; } break;
+  case 'V': if (ctrl) { PasteClipboard(); return true; } break;
   case 'Z': if (ctrl) { if (shift) Redo(); else Undo(); return true; } break;
   case 'Y': if (ctrl) { Redo(); return true; } break;
   }

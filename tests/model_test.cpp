@@ -530,6 +530,119 @@ int main()
     CHECK(audio->str.empty() && audio->num.empty());
   }
 
+  // --- reordering (dragging a label) keeps every block's label and colour
+  {
+    MediaTrack* t5 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 500.0;
+    g_doc.Bind(kProj, t5);
+    g_doc.AppendBlock(); Sync();
+    auto& B = g_doc.blocks;
+    g_doc.ApplyText("a\n\nb\n\nc\n\nd", nullptr); Sync();
+    std::vector<std::string> labels; std::vector<int> colors;
+    for (auto& b : B) { labels.push_back(b.label); colors.push_back(b.color); }
+    CHECK(labels.size() == 4 && labels[1] == "VERSE" && labels[2] == "CHORUS");
+    g_doc.MoveBlock(2, 1); Sync();   // CHORUS above VERSE
+    CHECK(B[1].Text() == "c" && B[1].label == labels[2] && B[1].color == colors[2]);
+    CHECK(B[2].Text() == "b" && B[2].label == labels[1] && B[2].color == colors[1]);
+    g_doc.MoveBlock(0, 4); Sync();   // INTRO to the end
+    CHECK(B[3].Text() == "a" && B[3].label == "INTRO" && B[3].color == colors[0]);
+    CHECK(B[0].Text() == "c" && B[0].label == "CHORUS" && B[2].Text() == "d" && B[2].label == "OUTRO");
+    CHECK(NoOverlaps() && ItemFits());
+
+    // the editor drag: drop index from the ghost, and the other labels shunting to make room
+    // (three blocks of 1, 2 and 1 lines at 20 px a line, a blank line after each)
+    std::vector<std::pair<int, int>> spans = { { 0, 20 }, { 40, 80 }, { 100, 120 } };
+    std::vector<int> heights = { 40, 60, 40 };
+    CHECK(DragInsertIndex(spans, 0, 10) == 0);     // not past anything: stays
+    CHECK(DragInsertIndex(spans, 0, 70) == 2);     // past the middle of block 1: after it
+    CHECK(DragInsertIndex(spans, 0, 115) == 3);    // to the end
+    CHECK(DragInsertIndex(spans, 2, 50) == 1);     // last one up, above block 1
+    int slot = -1;
+    auto tg = DragShuntTargets(heights, 0, 2, 0, &slot);
+    CHECK(tg[1] == 0 && slot == 60 && tg[2] == 100);   // block 1 slides up into the gap
+    tg = DragShuntTargets(heights, 2, 1, 0, &slot);
+    CHECK(tg[0] == 0 && slot == 40 && tg[1] == 80);    // block 1 slides down to make room
+    tg = DragShuntTargets(heights, 1, 1, 0, &slot);
+    CHECK(tg[0] == 0 && slot == 40 && tg[2] == 100);   // no move: everything at home
+  }
+
+  // --- copy / paste: block data only when pasted on a clean line
+  {
+    // where a paste lands
+    std::vector<std::string> L = { "a1", "a2", "", "b1", "", "" };
+    std::string t = "x\ny"; int fp = -1;
+    CHECK(!PrepareBlockPaste(L, 0, t, &fp) && t == "x\ny");          // inside a block: text only
+    CHECK(!PrepareBlockPaste(L, 3, t, &fp));
+    t = "\nx\n"; CHECK(PrepareBlockPaste(L, 5, t, &fp) && t == "x" && fp == 2);       // after the last block
+    t = "x"; CHECK(PrepareBlockPaste(L, 2, t, &fp) && t == "\nx\n" && fp == 1);       // the one blank line between two blocks
+    t = "x"; CHECK(PrepareBlockPaste(L, 4, t, &fp) && t == "\nx" && fp == 2);
+
+    // which blocks a selection copies from
+    std::vector<std::string> lines = { "one", "two", "", "three", "four", "", "five" };
+    std::vector<std::pair<int, int>> spans = { { 0, 1 }, { 3, 4 }, { 6, 6 } };
+    std::vector<std::string> texts = { "one\ntwo", "three\nfour", "five" };
+    auto c1 = CopiedBlocks(lines, spans, texts, 3, 0, 4, 4);
+    CHECK(c1.size() == 1 && c1[0].block == 1 && c1[0].whole);
+    auto c2 = CopiedBlocks(lines, spans, texts, 1, 0, 3, 5);       // "two" .. "three"
+    CHECK(c2.size() == 2 && c2[0].block == 0 && !c2[0].whole && c2[1].block == 1 && !c2[1].whole);
+    CHECK(CopiedBlocks(lines, spans, texts, 1, 3, 3, 0).empty());   // only line breaks
+    auto c4 = CopiedBlocks(lines, spans, texts, 0, 0, 6, 4);
+    CHECK(c4.size() == 3 && c4[0].whole && c4[1].whole && c4[2].whole);
+
+    // the model side
+    MediaTrack* t6 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 700.0;
+    g_doc.Bind(kProj, t6);
+    g_doc.AppendBlock(); Sync();
+    auto& B = g_doc.blocks;
+    g_doc.ApplyText("a\n\nb1\nb2\n\nc", nullptr); Sync();
+    int pink = ColorToNative(230, 120, 170) | 0x1000000;
+    g_doc.SetLabel(1, "HOOK", true); g_doc.SetColor(1, pink, true); Sync();
+    g_doc.DragBlockEdge(1, false, B[1].end + 1.5, true); g_doc.EndDrag("resize");
+    g_doc.DragLineStart(1, 1, B[1].start + 1.0); g_doc.EndDrag("line");
+    LyricBlock hook = B[1];
+
+    // a whole block pasted after the last one: same label, colour, length and line timing
+    PastedBlock w = PastedBlock::From(hook, true); w.para = 3;
+    std::vector<PastedBlock> pv = { w };
+    g_doc.ApplyText("a\n\nb1\nb2\n\nc\n\nb1\nb2", nullptr, &pv); Sync();
+    CHECK(B.size() == 4);
+    CHECK(Near(B[1].start, hook.start) && Near(B[1].end, hook.end) && B[1].label == "HOOK");   // original untouched
+    CHECK(B[3].label == "HOOK" && B[3].color == pink && B[3].customLabel && B[3].customColor);
+    CHECK(Near(B[3].Len(), hook.Len()) && Near(B[3].lines[1].pos - B[3].start, hook.lines[1].pos - hook.start));
+    CHECK(Near(B[3].start, B[2].end));
+    CHECK(NoOverlaps() && ItemFits());
+
+    // pasted before the block it was copied from: the original keeps its own timing
+    double s1 = B[1].start;
+    w.para = 0; pv = { w };
+    g_doc.ApplyText("b1\nb2\n\na\n\nb1\nb2\n\nc\n\nb1\nb2", nullptr, &pv); Sync();
+    CHECK(B.size() == 5 && B[0].label == "HOOK" && B[0].color == pink && B[2].label == "HOOK" && Near(B[2].start, s1));
+    CHECK(NoOverlaps() && ItemFits());
+
+    // part of a block: label and colour, default size (2 bars per line)
+    PastedBlock part = PastedBlock::From(hook, false); part.para = 5;
+    pv = { part };
+    g_doc.ApplyText(g_doc.ToText() + "\n\nb2", nullptr, &pv); Sync();
+    CHECK(B.size() == 6 && B[5].label == "HOOK" && B[5].color == pink && B[5].autoLen && Near(B[5].Len(), g_doc.LineSlot()));
+
+    // plain text (pasted inside a block, or text from elsewhere): no block data
+    g_doc.ApplyText(g_doc.ToText() + "\n\nb1\nb2", nullptr); Sync();
+    CHECK(B.size() == 7 && B[6].label != "HOOK" && !B[6].customLabel && !B[6].customColor);
+    int hooks = 0; for (auto& b : B) if (b.label == "HOOK") hooks++;
+    CHECK(hooks == 4);
+
+    // pasted into an empty lyric track: takes the place of its empty first block
+    MediaTrack* t7 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 900.0;
+    g_doc.Bind(kProj, t7);
+    g_doc.AppendBlock(); Sync();
+    double s0 = B[0].start;
+    w.para = 0; pv = { w };
+    g_doc.ApplyText("b1\nb2", nullptr, &pv); Sync();
+    CHECK(B.size() == 1 && B[0].label == "HOOK" && Near(B[0].start, s0) && Near(B[0].Len(), hook.Len()));
+  }
+
   printf("%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

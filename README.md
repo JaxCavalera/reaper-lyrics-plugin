@@ -50,7 +50,14 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     for label presets, colour, delete;
   - below the lane, the **lyric text**: one blank line starts a new block. Edits are diffed
     against the existing blocks so timings survive typing. Drag a label chip in the gutter
-    up or down to move a whole block.
+    up or down to move a whole block: a see-through copy of the label follows the mouse and
+    the other labels slide out of the way to show where it will land. Moving blocks never
+    changes any block's label or colour;
+  - **copy and paste**: Ctrl+C / Ctrl+X / Ctrl+V, or right-click in the text for Cut / Copy /
+    Paste / Select all (Cut and Copy need a selection, Paste needs text on the clipboard).
+    Paste lyrics copied from blocks onto an **empty line outside every block** and they
+    become blocks with the same labels and colours — a whole copied block also keeps its
+    length and line timing. Pasted anywhere inside a block, only the text goes in.
 - Labels follow **INTRO, VERSE, CHORUS, VERSE, CHORUS, … OUTRO** automatically until you
   rename a block. A block starts in its label's default colour — **sky blue** INTRO,
   **light green** VERSE, **light orange** CHORUS, **grey** OUTRO — and renaming it never
