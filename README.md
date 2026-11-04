@@ -46,7 +46,7 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     drag the boundary between two lines to retime them. Blocks never overlap;
   - click the ruler to move the edit cursor; scroll with the scrollbar under the lane or the
     wheel. Zoom with the **Zoom -** / **Zoom +** buttons (they keep the playhead or edit cursor
-    in place), **Fit** to show the whole lyric item, or Ctrl+wheel / the wheel over the ruler
+    in place), **Fit** to show all the blocks, or Ctrl+wheel / the wheel over the ruler
     to zoom around the mouse; the playhead is followed while playing with *Track* on;
   - the window is resizable from any edge or the grip in the bottom-right corner;
   - click a block or line to jump to it in the text; double-click a block or its label chip
