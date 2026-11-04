@@ -64,6 +64,7 @@ private:
   int ReorderTarget(int block, double t) const;   // insertion index if dropping at t reorders, else -1
   bool OnLaneMouse(UINT msg, WPARAM wp, int x, int y);
   void ZoomAt(int x, double factor);
+  int ZoomAnchorX() const;
   void ClampView();
   void LaneRange(double* lo, double* hi) const;    // scrollable time range
   RECT ScrollbarRect() const;

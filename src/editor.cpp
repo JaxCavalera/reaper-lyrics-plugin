@@ -22,7 +22,7 @@ static const COLORREF kDim = RGB(128, 128, 128);
 static const COLORREF kButton = RGB(58, 58, 58);
 static const COLORREF kAccent = RGB(74, 144, 217);
 
-enum { BTN_TRACKSEL = 1, BTN_TRACK, BTN_PANEL, BTN_ADD };
+enum { BTN_TRACKSEL = 1, BTN_TRACK, BTN_PANEL, BTN_ZOOM_OUT, BTN_ZOOM_IN, BTN_ZOOM_FIT };
 enum { MENU_RENAME = 1, MENU_DELETE, MENU_GOTO, MENU_LABEL_PRESET = 10, MENU_LABEL_AUTO = 30, MENU_COLOR_PRESET = 40, MENU_COLOR_CUSTOM = 60, MENU_COLOR_AUTO, MENU_TRACK = 100 };
 
 struct ColorPreset { const char* name; COLORREF c; };
@@ -119,7 +119,9 @@ void LyricEditor::LayoutControls()
   m_buttons.push_back({ { 8, 7, 228, kToolbarH - 7 }, "", BTN_TRACKSEL, false });
   m_buttons.push_back({ { 236, 7, 312, kToolbarH - 7 }, "Track", BTN_TRACK, true });
   m_buttons.push_back({ { 320, 7, 424, kToolbarH - 7 }, "Lyrics panel", BTN_PANEL, true });
-  m_buttons.push_back({ { 432, 7, 508, kToolbarH - 7 }, "+ Block", BTN_ADD, false });
+  m_buttons.push_back({ { 440, 7, 508, kToolbarH - 7 }, "Zoom â", BTN_ZOOM_OUT, false });
+  m_buttons.push_back({ { 512, 7, 580, kToolbarH - 7 }, "Zoom +", BTN_ZOOM_IN, false });
+  m_buttons.push_back({ { 584, 7, 628, kToolbarH - 7 }, "Fit", BTN_ZOOM_FIT, false });
   if (m_renaming) CommitRename(true);
   Invalidate();
 }
@@ -373,7 +375,7 @@ void LyricEditor::PaintToolbar(HDC dc)
     DrawTextU8(dc, text, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
   }
   SetTextColor(dc, kDim);
-  RECT sr = { 520, m_toolbar.top, m_toolbar.right - 8, m_toolbar.bottom };
+  RECT sr = { 640, m_toolbar.top, m_toolbar.right - 8, m_toolbar.bottom };
   DrawTextU8(dc, m_status, &sr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
   SelectObject(dc, oldFont);
 }
@@ -514,6 +516,18 @@ void LyricEditor::FitView()
   m_pxPerSec = std::max(2.0, (w - 48) / span);
   m_viewStart = a - 24.0 / m_pxPerSec;
   m_needFit = false;
+}
+
+// zoom buttons keep the playhead (while playing) or the edit cursor in place when it is in
+// view, otherwise the middle of the lane
+int LyricEditor::ZoomAnchorX() const
+{
+  if (g_doc.IsBound())
+  {
+    int x = TimeToX(g_doc.PlayOrEditPos());
+    if (x >= m_lane.left && x < m_lane.right) return x;
+  }
+  return (int)(m_lane.left + m_lane.right) / 2;
 }
 
 void LyricEditor::ZoomAt(int x, double factor)
@@ -660,7 +674,7 @@ void LyricEditor::PaintLane(HDC dc)
   {
     SetTextColor(dc, kDim);
     RECT tr = { r.left + 12, by0, r.right - 12, by1 };
-    DrawTextU8(dc, "Type lyrics below (or press + Block) to create the lyric item.", &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    DrawTextU8(dc, "Type lyrics below to create the lyric item.", &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
   }
   for (size_t i = 0; i < blocks.size(); i++)
   {
@@ -925,7 +939,8 @@ void LyricEditor::OnButton(int id)
 {
   if (id == BTN_TRACK) SetTracking(!m_tracking);
   else if (id == BTN_PANEL) { LyricsPanel::Get().Toggle(); Invalidate(); }
-  else if (id == BTN_ADD) { if (g_doc.IsBound()) StartNewBlock(); }
+  else if (id == BTN_ZOOM_IN || id == BTN_ZOOM_OUT) ZoomAt(ZoomAnchorX(), id == BTN_ZOOM_IN ? 1.5 : 1.0 / 1.5);
+  else if (id == BTN_ZOOM_FIT) { FitView(); Invalidate(); }
   else if (id == BTN_TRACKSEL)
   {
     POINT pt = { m_buttons[0].r.left, m_buttons[0].r.bottom };
@@ -1190,8 +1205,8 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     ScreenToClient(h, &pt);
     if (pt.x >= m_lane.left && pt.x < m_lane.right && pt.y >= m_lane.top && pt.y < m_lane.bottom)
     {
-      // lane: wheel scrolls in time, Ctrl+wheel zooms around the pointer
-      if (CtrlDown()) ZoomAt(pt.x, std::pow(1.25, delta / 120.0));
+      // lane: wheel scrolls in time; Ctrl+wheel (or the wheel over the ruler) zooms around the pointer
+      if (CtrlDown() || pt.y < m_lane.top + kRulerH) ZoomAt(pt.x, std::pow(1.25, delta / 120.0));
       else { m_viewStart -= (delta / 120.0) * 80.0 / m_pxPerSec; ClampView(); Invalidate(); }
       return 1;
     }

@@ -28,7 +28,9 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     moving anything else (the edge then stops at the next block);
     drag the boundary between two lines to retime them. Blocks never overlap;
   - click the ruler to move the edit cursor; scroll with the scrollbar under the lane or the
-    wheel, Ctrl+wheel zooms; the playhead is followed while playing with *Track* on;
+    wheel. Zoom with the **Zoom −** / **Zoom +** buttons (they keep the playhead or edit cursor
+    in place), **Fit** to show the whole lyric item, or Ctrl+wheel / the wheel over the ruler
+    to zoom around the mouse; the playhead is followed while playing with *Track* on;
   - the window is resizable from any edge or the grip in the bottom-right corner;
   - click a block or line to jump to it in the text; double-click a block or its label chip
     to rename it; right-click for label presets, colour, delete;
@@ -42,8 +44,7 @@ lines are laid out in full colour and can be moved, stretched and reordered.
   after it move along, keeping their gaps. Once you resize it or move one of its lines by
   hand (or stamp it live), it keeps the timing you gave it.
 - An empty editor is still one block — there's no placeholder text, and clearing the text
-  keeps the first block. **+ Block** puts the caret on a fresh paragraph; the block appears
-  as soon as you type its first line.
+  keeps the first block. Leave a blank line after a block and type to start the next one.
 - **Track** toggle: the sequencer follows playback, keeping the current block near the top
   and highlighting the current line. Untick it to edit freely while REAPER plays.
 - **Live typing**: with *Track* on and transport playing, press **Enter** to stamp the play
