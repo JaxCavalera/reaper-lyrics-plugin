@@ -60,8 +60,9 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     length and line timing. Pasted anywhere inside a block, only the text goes in.
 - Labels follow **INTRO, VERSE, CHORUS, VERSE, CHORUS, … OUTRO** automatically until you
   rename a block. A block starts in its label's default colour — **sky blue** INTRO,
-  **light green** VERSE, **light orange** CHORUS, **grey** OUTRO — and renaming it never
-  changes its colour; only picking a colour from the block menu does, and that colour stays.
+  **light green** VERSE, **light orange** CHORUS, **grey** OUTRO. Typing a new name never
+  changes its colour; picking a **label preset** gives it that preset's colour, and picking a
+  colour from the block menu sets it for good.
 - **Default size: 2 bars per line.** A new block gets 2 bars for each of its lines, evenly
   spaced, and keeps growing or shrinking by 2 bars as you add or remove lines — the blocks
   after it move along, keeping their gaps. Once you resize it or move one of its lines by

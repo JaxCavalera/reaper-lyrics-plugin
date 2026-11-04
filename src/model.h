@@ -89,7 +89,8 @@ public:
 
   // structural ops (each creates an undo point)
   void MoveBlock(int from, int to);     // reorder (to = insertion index in the current order)
-  void SetLabel(int i, const std::string& label, bool custom);
+  void SetLabel(int i, const std::string& label, bool custom);       // rename: colour kept
+  void ApplyLabelPreset(int i, const std::string& label);             // preset: its colour too ("" = automatic)
   void SetColor(int i, int nativeColor, bool custom);
   void DeleteBlock(int i);
   void AppendBlock(double atPos = -1);

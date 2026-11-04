@@ -1137,8 +1137,8 @@ void LyricEditor::ShowBlockMenu(int block, POINT pt)
   if (cmd == MENU_RENAME) BeginRename(block);
   else if (cmd == MENU_DELETE) { g_doc.DeleteBlock(block); RefreshText(); }
   else if (cmd == MENU_GOTO) SetEditCurPos2(g_doc.proj, g_doc.blocks[block].start, true, false);
-  else if (cmd >= MENU_LABEL_PRESET && cmd < MENU_LABEL_PRESET + np) g_doc.SetLabel(block, presets[cmd - MENU_LABEL_PRESET], true);
-  else if (cmd == MENU_LABEL_AUTO) g_doc.SetLabel(block, "", false);
+  else if (cmd >= MENU_LABEL_PRESET && cmd < MENU_LABEL_PRESET + np) g_doc.ApplyLabelPreset(block, presets[cmd - MENU_LABEL_PRESET]);
+  else if (cmd == MENU_LABEL_AUTO) g_doc.ApplyLabelPreset(block, "");
   else if (cmd >= MENU_COLOR_PRESET && cmd < MENU_COLOR_PRESET + kNumColors) g_doc.SetColor(block, ColorrefToNative(kColors[cmd - MENU_COLOR_PRESET].c), true);
   else if (cmd == MENU_COLOR_AUTO) g_doc.SetColor(block, 0, false);
   else if (cmd == MENU_COLOR_CUSTOM)

@@ -893,6 +893,20 @@ void LyricDoc::SetLabel(int i, const std::string& label, bool custom)
   UndoPoint("Lyrics: rename block");
 }
 
+void LyricDoc::ApplyLabelPreset(int i, const std::string& label)
+{
+  if (!ValidateTrack() || i < 0 || i >= (int)blocks.size()) return;
+  FlushUndo(true);
+  // a preset brings its own colour (empty label = the automatic one); the colour then
+  // follows that label until the user renames the block or picks a colour
+  blocks[i].customLabel = !label.empty();
+  blocks[i].label = label.empty() ? AutoLabel(i, (int)blocks.size()) : label;
+  blocks[i].customColor = false;
+  blocks[i].color = DefaultColorForLabel(blocks[i].label);
+  Write();
+  UndoPoint("Lyrics: label preset");
+}
+
 void LyricDoc::SetColor(int i, int nativeColor, bool custom)
 {
   if (!ValidateTrack() || i < 0 || i >= (int)blocks.size()) return;

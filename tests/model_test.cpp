@@ -470,23 +470,34 @@ int main()
     CHECK(B[1].label == "Verse 1" && B[1].color == green);
     g_doc.SetLabel(1, "CHORUS", true); Sync();
     CHECK(B[1].label == "CHORUS" && B[1].color == green);
-    // picking a preset label for the OUTRO keeps it grey
+    // typing OUTRO's name by hand keeps it grey
     int grey = B[3].color;
     g_doc.SetLabel(3, "BRIDGE", true); Sync();
     CHECK(B[3].color == grey);
-    // back to the automatic label: colour still unchanged
-    g_doc.SetLabel(1, "", false); Sync();
-    CHECK(B[1].label == "VERSE" && B[1].color == green);
-    // further typing (relabelling the automatic ones) leaves renamed blocks' colours alone
+    // ...but picking a preset label switches to that preset's colour, even over a picked colour
+    g_doc.ApplyLabelPreset(3, "CHORUS"); Sync();
+    CHECK(B[3].label == "CHORUS" && B[3].customLabel && B[3].color == LyricDoc::DefaultColorForLabel("CHORUS"));
+    g_doc.SetColor(3, rgb(10, 20, 30), true); Sync();
+    g_doc.ApplyLabelPreset(3, "OUTRO"); Sync();
+    CHECK(B[3].label == "OUTRO" && B[3].color == grey && !B[3].customColor);
+    g_doc.ApplyLabelPreset(3, "BRIDGE"); Sync();
+    int bridge = LyricDoc::DefaultColorForLabel("BRIDGE");
+    CHECK(B[3].color == bridge);
+    // the Automatic preset: automatic label and its colour (VERSE = light green)
+    g_doc.ApplyLabelPreset(1, ""); Sync();
+    CHECK(B[1].label == "VERSE" && !B[1].customLabel && B[1].color == green);
+    // a preset colour survives later typing and storage
     g_doc.ApplyText("a\n\nb\n\nx\n\nc\n\nd", nullptr); Sync();
-    CHECK(B.size() == 5 && B[1].color == green && B[4].label == "BRIDGE" && B[4].color == grey);
+    CHECK(B.size() == 5 && B[1].color == green && B[4].label == "BRIDGE" && B[4].color == bridge);
+    g_doc.Bind(kProj, t4);
+    CHECK(B[4].label == "BRIDGE" && B[4].color == bridge);
     // a user-picked colour survives a rename and storage
     int pink = rgb(230, 120, 170);
     g_doc.SetColor(2, pink, true); Sync();
     g_doc.SetLabel(2, "HOOK", true); Sync();
     CHECK(B[2].label == "HOOK" && B[2].color == pink);
     g_doc.Bind(kProj, t4);
-    CHECK(B[2].color == pink && B[1].color == green && B[4].color == grey);
+    CHECK(B[2].color == pink && B[1].color == green && B[4].color == bridge);
   }
 
   // --- lyric track look: theme layout, hidden in mixer, fixed height, colour, no recording
