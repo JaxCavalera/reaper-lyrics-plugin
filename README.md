@@ -5,6 +5,10 @@ adds **lyric tracks**. Like a MIDI item, a lyric track holds a single **lyric it
 timeline; double-click it to open the **lyric sequencer**, where the song's lyric blocks and
 lines are laid out in full colour and can be moved, stretched and reordered.
 
+**Download:** prebuilt Windows and Linux plugins are on the
+[Releases page](https://github.com/JaxCavalera/reaper-lyrics-plugin/releases) (see
+[Releases](#releases) below), or build it yourself.
+
 ## What you get
 
 - **Insert lyric track** in the track-panel right-click menu (next to *Insert track from
@@ -215,5 +219,20 @@ src/resource.rc     Windows dialog shells      src/resource_swell.cpp  the same 
 reaper-sdk/         REAPER SDK headers (submodule)   WDL/   WDL: SWELL headers, win32_utf8 (submodule)
 ```
 
-There are no prebuilt downloads yet: build it as above (a few minutes). The Windows DLL can
-then be copied to any 64-bit Windows PC.
+## Releases
+
+Prebuilt plugins are on the [Releases page](https://github.com/JaxCavalera/reaper-lyrics-plugin/releases):
+`reaper_lyrics.dll` (Windows 64-bit) and `reaper_lyrics.so` (Linux x86_64, glibc 2.31+ —
+Ubuntu 20.04 / Debian 11 or newer). Put the file in REAPER's `UserPlugins` folder (see
+*Install* above) and restart REAPER.
+
+They are built by GitHub Actions (`.github/workflows/build.yml`), which builds and tests both
+platforms on every push. To publish a new version, tag it and push the tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow then builds, runs the tests and the portability checks, and creates the release
+with both files attached (the Linux one is built on Ubuntu 20.04 so it runs on older distros).
