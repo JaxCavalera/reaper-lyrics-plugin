@@ -1,6 +1,7 @@
 #include "util.h"
 #include "api.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -246,6 +247,32 @@ double WheelZoomFactor(int wheelDelta)
   while (n >= 1.0) { f *= 1.25; n -= 1.0; }
   f *= 1.0 + 0.25 * n;   // part of a notch (touchpads): close to 1.25^n, and monotonic
   return down ? 1.0 / f : f;
+}
+
+double SnapTime(double t, const std::vector<double>& targets, double tol, double* hitAt)
+{
+  double best = t, bestD = tol;
+  bool hit = false;
+  for (double g : targets)
+  {
+    double d = std::fabs(g - t);
+    if (d <= bestD) { best = g; bestD = d; hit = true; }
+  }
+  if (hitAt) *hitAt = hit ? best : -1.0;
+  return best;
+}
+
+double SnapSpan(double start, double len, const std::vector<double>& targets, double tol, double* hitAt)
+{
+  double hs = -1, he = -1;
+  double s = SnapTime(start, targets, tol, &hs);
+  double e = SnapTime(start + len, targets, tol, &he);
+  bool byStart = hs >= 0, byEnd = he >= 0;
+  if (byStart && byEnd) { if (std::fabs(e - (start + len)) < std::fabs(s - start)) byStart = false; else byEnd = false; }
+  if (hitAt) *hitAt = byStart ? hs : byEnd ? he : -1.0;
+  if (byStart) return s;
+  if (byEnd) return e - len;
+  return start;
 }
 
 KeyRoute RouteEditorKey(bool wantsKeys, unsigned msg, int vk, bool ctrl)

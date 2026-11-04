@@ -62,6 +62,13 @@ int DragInsertIndex(const std::vector<std::pair<int, int>>& spans, int dragged, 
 long long ParseInt(const char* p, const char** end);   // like strtoll(p, end, 10)
 double WheelZoomFactor(int wheelDelta);                // 1.25 per notch (120), smooth in between
 
+// Snapping in the sequencer lane. tol is the snap distance in seconds (a few pixels at the
+// current zoom). SnapTime: the nearest target within tol, else t. SnapSpan: a span of length
+// len starting at start, snapped by whichever of its two edges is closer to a target; returns
+// the new start. *hitAt (optional) gets the target snapped to, or -1 when nothing snapped.
+double SnapTime(double t, const std::vector<double>& targets, double tol, double* hitAt = nullptr);
+double SnapSpan(double start, double len, const std::vector<double>& targets, double tol, double* hitAt = nullptr);
+
 // Where a key pressed in the sequencer window goes. wantsKeys: the lyric text was clicked
 // into, or a label is being renamed.
 enum KeyRoute { KEY_DEFAULT, KEY_TO_REAPER, KEY_TO_EDITOR };

@@ -48,6 +48,11 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     moves by the same amount, keeping the gaps between them — hold **Shift** to resize without
     moving anything else (the edge then stops at the next block);
     drag the boundary between two lines to retime them. Blocks never overlap;
+  - **Snap** (toolbar, on by default): while dragging, a block, a block edge or a line
+    boundary jumps to the edit cursor (and the playhead while playing) or to another block's
+    start or end once it is within 10 pixels of it — a yellow guide shows what it snapped to.
+    Dragging in the ruler snaps the edit cursor to block edges the same way. Untick **Snap**
+    to drag smoothly;
   - click the ruler to move the edit cursor; scroll with the scrollbar under the lane or the
     wheel. Zoom with the **Zoom -** / **Zoom +** buttons (they keep the playhead or edit cursor
     in place), **Fit** to show all the blocks, or Ctrl+wheel / the wheel over the ruler

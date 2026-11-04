@@ -113,6 +113,12 @@ private:
   LaneHitKind m_laneDrag = HIT_NONE; int m_laneBlock = -1, m_laneLine = -1;
   double m_laneGrab = 0; bool m_laneMoved = false; POINT m_laneDown = { 0, 0 };
   int m_laneDrop = -1;
+  // snapping in the lane: to the edit cursor / playhead and the edges of the other blocks
+  bool m_snap = true;
+  double m_snapAt = -1;   // what the current drag snapped to (drawn), -1 = nothing
+  void SetSnap(bool on);
+  std::vector<double> SnapTargets(int exceptBlock, bool cursor) const;
+  double SnapTol() const;   // seconds: kSnapPx at the current zoom
   double m_lastPlayDrawn = -1;
   double m_scrollLo = 0, m_scrollHi = 0; int m_scrollGrab = 0;   // range + grab offset while dragging the thumb
 };

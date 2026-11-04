@@ -23,7 +23,8 @@ static const COLORREF kDim = RGB(128, 128, 128);
 static const COLORREF kButton = RGB(58, 58, 58);
 static const COLORREF kAccent = RGB(74, 144, 217);
 
-enum { BTN_TRACKSEL = 1, BTN_TRACK, BTN_PANEL, BTN_ZOOM_OUT, BTN_ZOOM_IN, BTN_ZOOM_FIT };
+enum { BTN_TRACKSEL = 1, BTN_TRACK, BTN_PANEL, BTN_ZOOM_OUT, BTN_ZOOM_IN, BTN_ZOOM_FIT, BTN_SNAP };
+static const int kSnapPx = 10;   // snap distance on screen
 enum { MENU_RENAME = 1, MENU_DELETE, MENU_GOTO, MENU_LABEL_PRESET = 10, MENU_LABEL_AUTO = 30, MENU_COLOR_PRESET = 40, MENU_COLOR_CUSTOM = 60, MENU_COLOR_AUTO, MENU_TRACK = 100,
        MENU_RESTYLE = 900, MENU_LAYOUT_AUTO, MENU_LAYOUT_DEFAULT, MENU_LAYOUT = 1000,
        MENU_TEXT_CUT = 1300, MENU_TEXT_COPY, MENU_TEXT_PASTE, MENU_TEXT_SELALL };
@@ -69,6 +70,31 @@ void LyricEditor::SetTracking(bool on)
   Invalidate();
 }
 
+void LyricEditor::SetSnap(bool on)
+{
+  m_snap = on;
+  IniSetInt("editor", "snap", on ? 1 : 0);
+  Invalidate();
+}
+
+double LyricEditor::SnapTol() const { return kSnapPx / std::max(1e-6, m_pxPerSec); }
+
+// The edit cursor (and the playhead while playing) plus the start and end of every block
+// except the one being dragged.
+std::vector<double> LyricEditor::SnapTargets(int exceptBlock, bool cursor) const
+{
+  std::vector<double> t;
+  if (!g_doc.IsBound()) return t;
+  if (cursor)
+  {
+    t.push_back(GetCursorPositionEx(g_doc.proj));
+    if (g_doc.IsPlaying()) t.push_back(GetPlayPosition2Ex(g_doc.proj));
+  }
+  for (int i = 0; i < (int)g_doc.blocks.size(); i++)
+    if (i != exceptBlock) { t.push_back(g_doc.blocks[i].start); t.push_back(g_doc.blocks[i].end); }
+  return t;
+}
+
 // ------------------------------------------------------------------ creation
 
 WDL_DLGRET LyricEditor::DlgProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
@@ -83,6 +109,7 @@ void LyricEditor::Create()
 {
   if (m_hwnd) return;
   m_tracking = IniGetInt("editor", "track", 1) != 0;
+  m_snap = IniGetInt("editor", "snap", 1) != 0;   // on unless switched off
   CreateDlg(IDD_EDITOR, g_mainHwnd, DlgProc, (LPARAM)this);
   if (!m_hwnd) return;
   m_font = MakeFont(17, false);
@@ -129,6 +156,7 @@ void LyricEditor::LayoutControls()
   m_buttons.push_back({ { 440, 7, 508, kToolbarH - 7 }, "Zoom -", BTN_ZOOM_OUT, false });
   m_buttons.push_back({ { 512, 7, 580, kToolbarH - 7 }, "Zoom +", BTN_ZOOM_IN, false });
   m_buttons.push_back({ { 584, 7, 628, kToolbarH - 7 }, "Fit", BTN_ZOOM_FIT, false });
+  m_buttons.push_back({ { 640, 7, 712, kToolbarH - 7 }, "Snap", BTN_SNAP, true });
   if (m_renaming) CommitRename(true);
   Invalidate();
 }
@@ -437,7 +465,7 @@ void LyricEditor::PaintToolbar(HDC dc)
   SetBkMode(dc, TRANSPARENT);
   for (auto& b : m_buttons)
   {
-    bool on = (b.id == BTN_TRACK && m_tracking) || (b.id == BTN_PANEL && LyricsPanel::Get().IsVisible());
+    bool on = (b.id == BTN_TRACK && m_tracking) || (b.id == BTN_PANEL && LyricsPanel::Get().IsVisible()) || (b.id == BTN_SNAP && m_snap);
     RoundRectColor(dc, b.r, on ? kAccent : kButton, 6);
     SetTextColor(dc, RGB(240, 240, 240));
     std::string text = b.text;
@@ -447,7 +475,7 @@ void LyricEditor::PaintToolbar(HDC dc)
     DrawTextU8(dc, text, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
   }
   SetTextColor(dc, kDim);
-  RECT sr = { 640, m_toolbar.top, m_toolbar.right - 8, m_toolbar.bottom };
+  RECT sr = { 724, m_toolbar.top, m_toolbar.right - 8, m_toolbar.bottom };
   DrawTextU8(dc, m_status, &sr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
   SelectObject(dc, oldFont);
 }
@@ -827,6 +855,13 @@ void LyricEditor::PaintLane(HDC dc)
     FillRectColor(dc, mk, RGB(255, 255, 255));
   }
 
+  // snap guide: where the current drag snapped to
+  if (m_laneDrag != HIT_NONE && m_snapAt >= 0)
+  {
+    int sx = TimeToX(m_snapAt);
+    if (sx >= r.left && sx < r.right) { RECT s = { sx - 1, r.top + kRulerH, sx + 1, ly1 + 6 }; FillRectColor(dc, s, RGB(255, 214, 90)); }
+  }
+
   // edit cursor and playhead
   int ex = TimeToX(GetCursorPositionEx(proj));
   if (ex >= r.left && ex < r.right) { RECT e = { ex, r.top, ex + 1, ly1 + 2 }; FillRectColor(dc, e, RGB(175, 175, 175)); }
@@ -958,13 +993,35 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
     if (!m_laneMoved && std::abs(x - m_laneDown.x) < 3) return true;
     m_laneMoved = true;
     double t = XToTime(x);
+    // Snap (when on): what's dragged jumps to the edit cursor / playhead or another block's
+    // edge once it is within kSnapPx of it; with Snap off it follows the mouse smoothly.
+    double tol = SnapTol();
+    m_snapAt = -1;
     switch (m_laneDrag)
     {
-    case HIT_RULER: SetEditCurPos2(g_doc.proj, std::max(0.0, t), false, true); break;
-    case HIT_BLOCK: g_doc.DragBlockTo(m_laneBlock, t - m_laneGrab); m_laneDrop = ReorderTarget(m_laneBlock, t); break;
-    case HIT_BLOCK_LEFT: g_doc.DragBlockEdge(m_laneBlock, true, t); break;
-    case HIT_BLOCK_RIGHT: g_doc.DragBlockEdge(m_laneBlock, false, t, !ShiftDown()); break;   // Shift: no ripple
-    case HIT_LINE_EDGE: g_doc.DragLineStart(m_laneBlock, m_laneLine, t); break;
+    case HIT_RULER:
+      if (m_snap) t = SnapTime(t, SnapTargets(-1, false), tol, &m_snapAt);   // cursor onto block edges
+      SetEditCurPos2(g_doc.proj, std::max(0.0, t), false, true);
+      break;
+    case HIT_BLOCK:
+    {
+      double s = t - m_laneGrab;
+      if (m_snap && m_laneBlock < (int)g_doc.blocks.size())
+        s = SnapSpan(s, g_doc.blocks[m_laneBlock].Len(), SnapTargets(m_laneBlock, true), tol, &m_snapAt);
+      g_doc.DragBlockTo(m_laneBlock, s);
+      m_laneDrop = ReorderTarget(m_laneBlock, t);
+      break;
+    }
+    case HIT_BLOCK_LEFT:
+    case HIT_BLOCK_RIGHT:
+      if (m_snap) t = SnapTime(t, SnapTargets(m_laneBlock, true), tol, &m_snapAt);
+      if (m_laneDrag == HIT_BLOCK_LEFT) g_doc.DragBlockEdge(m_laneBlock, true, t);
+      else g_doc.DragBlockEdge(m_laneBlock, false, t, !ShiftDown());   // Shift: no ripple
+      break;
+    case HIT_LINE_EDGE:
+      if (m_snap) t = SnapTime(t, SnapTargets(-1, true), tol, &m_snapAt);
+      g_doc.DragLineStart(m_laneBlock, m_laneLine, t);
+      break;
     default: break;
     }
     Invalidate();
@@ -975,6 +1032,7 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
     if (m_laneDrag == HIT_NONE) return false;
     LaneHitKind k = m_laneDrag;
     m_laneDrag = HIT_NONE;
+    m_snapAt = -1;
     if (GetCapture() == m_hwnd) ReleaseCapture();
     int drop = m_laneDrop; m_laneDrop = -1;
     if (k == HIT_RULER || k == HIT_SCROLL) {}
@@ -1057,6 +1115,7 @@ int LyricEditor::ButtonAt(int x, int y)
 void LyricEditor::OnButton(int id)
 {
   if (id == BTN_TRACK) SetTracking(!m_tracking);
+  else if (id == BTN_SNAP) SetSnap(!m_snap);
   else if (id == BTN_PANEL) { LyricsPanel::Get().Toggle(); Invalidate(); }
   else if (id == BTN_ZOOM_IN || id == BTN_ZOOM_OUT) ZoomAt(ZoomAnchorX(), id == BTN_ZOOM_IN ? 1.5 : 1.0 / 1.5);
   else if (id == BTN_ZOOM_FIT) { FitView(); Invalidate(); }

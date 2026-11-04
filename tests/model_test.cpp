@@ -573,6 +573,46 @@ int main()
     CHECK(B[2].color == pink && B[1].color == green && B[4].color == bridge);
   }
 
+  // --- snapping in the sequencer lane
+  {
+    std::vector<double> tg = { 4.0, 10.0, 20.0 };
+    double at = 0;
+    CHECK(Near(SnapTime(4.3, tg, 0.5, &at), 4.0) && Near(at, 4.0));          // within reach: snaps
+    CHECK(Near(SnapTime(4.6, tg, 0.5, &at), 4.6) && at < 0);                 // too far: smooth
+    CHECK(Near(SnapTime(9.8, tg, 0.5), 10.0));
+    CHECK(Near(SnapTime(4.4, { 4.0, 4.5 }, 0.5), 4.5));                      // nearest target wins
+    // a span snaps by whichever edge is closer: start 3.8 -> 4 (end 7.8 is far from 10)
+    CHECK(Near(SnapSpan(3.8, 4.0, tg, 0.5, &at), 4.0) && Near(at, 4.0));
+    // end 9.7 -> 10 beats start 5.7 (nothing near): start becomes 6
+    CHECK(Near(SnapSpan(5.7, 4.0, tg, 0.5, &at), 6.0) && Near(at, 10.0));
+    CHECK(Near(SnapSpan(16.2, 4.0, tg, 0.5, &at), 16.0) && Near(at, 20.0));  // end 20.2 -> 20
+    // both edges near targets: the closer one wins (start 4.2 is 0.2 off 4, end 10.1 is 0.1 off 10)
+    CHECK(Near(SnapSpan(4.2, 5.9, tg, 0.5, &at), 4.1) && Near(at, 10.0));
+    CHECK(Near(SnapSpan(12.0, 4.0, tg, 0.5, &at), 12.0) && at < 0);          // nothing near
+
+    // in the document: dragging block 2 close to block 1's end makes them touch exactly
+    MediaTrack* t6 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 700.0;
+    g_doc.Bind(kProj, t6);
+    g_doc.AppendBlock(); Sync();
+    g_doc.ApplyText("a\n\nb", nullptr); Sync();
+    auto& B = g_doc.blocks;
+    double gapStart = B[0].end + 6.0;
+    g_doc.DragBlockTo(1, gapStart); Sync();                                    // leave a gap
+    std::vector<double> targets = { g_cursor, B[0].start, B[0].end };          // what the editor offers
+    double tol = 10.0 / 40.0;                                                  // 10 px at 40 px/s
+    double want = B[0].end + 0.2;                                              // 8 px off
+    g_doc.DragBlockTo(1, SnapSpan(want, B[1].Len(), targets, tol)); Sync();
+    CHECK(Near(B[1].start, B[0].end) && NoOverlaps());                         // snapped: touching
+    g_doc.DragBlockTo(1, want); Sync();
+    CHECK(Near(B[1].start, B[0].end + 0.2));                                   // snap off: smooth
+    // the right edge of block 2 onto the edit cursor
+    g_cursor = B[1].end + 0.15;
+    double e = SnapTime(B[1].end + 0.1, { g_cursor, B[0].start, B[0].end }, tol);
+    g_doc.DragBlockEdge(1, false, e); Sync();
+    CHECK(Near(B[1].end, g_cursor) && ItemFits());
+  }
+
   // --- on the timeline the lyric item is a normal (empty MIDI) item showing only the block
   //     labels, as take markers at each block start in the block colour; no lyric text
   {
