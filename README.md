@@ -98,7 +98,10 @@ lines are laid out in full colour and can be moved, stretched and reordered.
   rather than one per keystroke.
 
 The lyrics are stored in the project (in the lyric item's ext state), so the project file
-carries them; only window positions go in `reaper_lyrics.ini` in REAPER's resource folder.
+carries them. The project also remembers whether the lyric sequencer and the lyrics panel were
+open when it was saved (and which lyric track the sequencer showed), and opens them again when
+it is loaded. Window sizes and positions, and the Track / Snap settings, go in
+`reaper_lyrics.ini` in REAPER's resource folder.
 Projects made with earlier builds (an item per block plus a marker per line) are converted
 to a single lyric item automatically, and their markers removed.
 

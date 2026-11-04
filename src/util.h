@@ -96,6 +96,12 @@ struct ClickCounter
   void SetDouble(unsigned long now, int px, int py) { tick = now; x = px; y = py; count = 2; }
 };
 
+// The project file remembers which lyric windows were open:
+//   LYRICS_WINDOWS <sequencer 0/1> <lyrics panel 0/1> [<track GUID the sequencer showed>]
+struct WindowState { bool sequencer = false, panel = false; std::string trackGuid; };
+std::string FormatWindowState(const WindowState& s);
+bool ParseWindowState(const char* line, WindowState* out);   // false if not our line
+
 // Where a key pressed in the sequencer window goes. wantsKeys: the lyric text was clicked
 // into, or a label is being renamed.
 enum KeyRoute { KEY_DEFAULT, KEY_TO_REAPER, KEY_TO_EDITOR };

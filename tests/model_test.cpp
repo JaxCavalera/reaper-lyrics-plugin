@@ -804,6 +804,17 @@ int main()
     CHECK(B[0].Text() == "c" && B[0].label == "CHORUS" && B[2].Text() == "d" && B[2].label == "OUTRO");
     CHECK(NoOverlaps() && ItemFits());
 
+    // which lyric windows were open, saved in the project file
+    {
+      WindowState s; s.sequencer = true; s.panel = false; s.trackGuid = "{ABCD-1234}";
+      std::string line = FormatWindowState(s);
+      CHECK(line == "LYRICS_WINDOWS 1 0 {ABCD-1234}");
+      WindowState r;
+      CHECK(ParseWindowState(line.c_str(), &r) && r.sequencer && !r.panel && r.trackGuid == "{ABCD-1234}");
+      CHECK(ParseWindowState("  LYRICS_WINDOWS 0 1", &r) && !r.sequencer && r.panel && r.trackGuid.empty());
+      CHECK(!ParseWindowState("LYRICS_WINDOWSX 1 1", &r) && !ParseWindowState("<TRACK", &r));
+    }
+
     // portable replacements for strtoll / pow
     { const char* s = " -12x"; const char* e = nullptr; CHECK(ParseInt(s, &e) == -12 && *e == 'x'); }
     { const char* s = "abc"; const char* e = nullptr; CHECK(ParseInt(s, &e) == 0 && e == s); }

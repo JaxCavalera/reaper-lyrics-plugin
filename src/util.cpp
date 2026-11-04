@@ -260,6 +260,30 @@ double WheelZoomFactor(int wheelDelta)
   return down ? 1.0 / f : f;
 }
 
+std::string FormatWindowState(const WindowState& s)
+{
+  std::string l = FormatStr("LYRICS_WINDOWS %d %d", s.sequencer ? 1 : 0, s.panel ? 1 : 0);
+  if (!s.trackGuid.empty()) l += " " + s.trackGuid;
+  return l;
+}
+
+bool ParseWindowState(const char* line, WindowState* out)
+{
+  const char* key = "LYRICS_WINDOWS";
+  while (*line == ' ' || *line == '\t') line++;
+  size_t n = strlen(key);
+  if (strncmp(line, key, n) != 0 || (line[n] != ' ' && line[n] != 0)) return false;
+  const char* p = line + n;
+  WindowState s;
+  const char* e = nullptr;
+  s.sequencer = ParseInt(p, &e) != 0; p = e;
+  s.panel = ParseInt(p, &e) != 0; p = e;
+  while (*p == ' ' || *p == '\t') p++;
+  while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') s.trackGuid += *p++;
+  *out = s;
+  return true;
+}
+
 void BlankRun(const std::vector<std::string>& lines, int ln, int* first, int* last)
 {
   int a = ln, b = ln;

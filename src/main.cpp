@@ -178,8 +178,69 @@ static void UnhookArrange()
   g_arrange = nullptr; g_arrangeOldProc = nullptr;
 }
 
+// ------------------------------------------------------------------ open windows, per project
+// Saving a project records whether the lyric sequencer and the lyrics panel were open (and
+// which lyric track the sequencer showed); loading it opens or closes them to match. Projects
+// saved without that line leave the windows as they are. Undo states don't carry it.
+
+static bool g_restorePending = false;
+static WindowState g_restore;
+
+static std::string TrackGuidStr(MediaTrack* t)
+{
+  char buf[64] = "";
+  if (t) guidToString(GetTrackGUID(t), buf);
+  return buf;
+}
+
+static MediaTrack* TrackByGuid(ReaProject* p, const std::string& guid)
+{
+  if (!p || guid.empty()) return nullptr;
+  int n = CountTracks(p);
+  for (int i = 0; i < n; i++) { MediaTrack* t = GetTrack(p, i); if (t && TrackGuidStr(t) == guid) return t; }
+  return nullptr;
+}
+
+static void BeginLoadState(bool isUndo, project_config_extension_t*)
+{
+  if (!isUndo) g_restorePending = false;
+}
+
+static bool ProcessStateLine(const char* line, ProjectStateContext*, bool isUndo, project_config_extension_t*)
+{
+  WindowState s;
+  if (!ParseWindowState(line, &s)) return false;
+  if (!isUndo) { g_restore = s; g_restorePending = true; }
+  return true;
+}
+
+static void SaveState(ProjectStateContext* ctx, bool isUndo, project_config_extension_t*)
+{
+  if (isUndo) return;   // opening a window is not an undoable change
+  WindowState s;
+  s.sequencer = LyricEditor::Get().IsVisible();
+  s.panel = LyricsPanel::Get().IsVisible();
+  if (g_doc.IsBound()) s.trackGuid = TrackGuidStr(g_doc.track);
+  ctx->AddLine("%s", FormatWindowState(s).c_str());
+}
+
+static project_config_extension_t g_projConfig = { ProcessStateLine, SaveState, BeginLoadState, nullptr };
+
+// after the project has finished loading (the timer runs once the load is done)
+static void RestoreWindows()
+{
+  if (!g_restorePending) return;
+  g_restorePending = false;
+  ReaProject* p = EnumProjects(-1, nullptr, 0);
+  MediaTrack* t = g_restore.sequencer ? TrackByGuid(p, g_restore.trackGuid) : nullptr;
+  if (t) LyricEditor::Get().OpenForTrack(t);
+  else LyricEditor::Get().Show(g_restore.sequencer);
+  LyricsPanel::Get().Show(g_restore.panel);
+}
+
 static void TimerFn()
 {
+  RestoreWindows();
   HookArrange();   // the arrange view may not exist yet when the plugin loads
   static DWORD lastStyle = 0;
   DWORD now = GetTickCount();
@@ -212,6 +273,7 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
       plugin_register("-hookcustommenu", (void*)MenuHook);
       plugin_register("-toggleaction", (void*)ToggleAction);
       plugin_register("-accelerator", (void*)&g_accelHook);
+      plugin_register("-projectconfig", (void*)&g_projConfig);
     }
     UnhookArrange();
     return 0;
@@ -233,5 +295,6 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_H
   rec->Register("hookcustommenu", (void*)MenuHook);
   rec->Register("timer", (void*)TimerFn);
   rec->Register("accelerator", &g_accelHook);
+  rec->Register("projectconfig", &g_projConfig);   // which lyric windows are open, per project
   return 1;
 }
