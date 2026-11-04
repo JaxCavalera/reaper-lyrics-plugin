@@ -44,15 +44,25 @@ static int ToggleAction(int cmd)
   return -1;
 }
 
+static bool MenuHasCommand(HMENU hm, int cmd)
+{
+  int n = GetMenuItemCount(hm);
+  for (int i = 0; i < n; i++)
+    if ((int)GetMenuItemID(hm, i) == cmd) return true;
+  return false;
+}
+
 // Adds "Insert lyric track" right after "Insert track from template" in the
-// track-panel context menu and the main Track menu.
+// track-panel context menus (empty area and on a track) and the main Track menu.
+// Handles both flag 0 (menu built) and flag 1 (about to show): context menus may be
+// built lazily or rebuilt, so insert whenever our item is missing.
 static void MenuHook(const char* menuid, void* menu, int flag)
 {
-  if (flag != 0 || !menu) return;
-  bool tcp = !strcmp(menuid, "Track control panel context");
-  bool trackMenu = !strcmp(menuid, "Main track");
-  if (!tcp && !trackMenu) return;
+  if ((flag != 0 && flag != 1) || !menu || !menuid || !g_cmdInsert) return;
+  if (strcmp(menuid, "Empty TCP context") && strcmp(menuid, "Track control panel context") &&
+      strcmp(menuid, "Main track")) return;
   HMENU hm = (HMENU)menu;
+  if (MenuHasCommand(hm, g_cmdInsert)) return;
   int n = GetMenuItemCount(hm), at = -1;
   for (int i = 0; i < n; i++)
   {
