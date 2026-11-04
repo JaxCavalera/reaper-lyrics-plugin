@@ -439,6 +439,48 @@ int main()
     CHECK(OnlyTheLyricItem());
   }
 
+  // --- label colours: defaults by label; renaming never recolours; a set colour sticks
+  {
+    auto rgb = [](int r, int g, int b) { return ColorToNative(r, g, b) | 0x1000000; };
+    CHECK(LyricDoc::DefaultColorForLabel("INTRO") == rgb(110, 182, 236));    // sky blue
+    CHECK(LyricDoc::DefaultColorForLabel("VERSE") == rgb(128, 200, 128));    // light green
+    CHECK(LyricDoc::DefaultColorForLabel("CHORUS") == rgb(246, 176, 98));    // light orange
+    CHECK(LyricDoc::DefaultColorForLabel("OUTRO") == rgb(141, 141, 141));    // grey
+
+    MediaTrack* t4 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 300.0;
+    g_doc.Bind(kProj, t4);
+    g_doc.AppendBlock(); Sync();
+    auto& B = g_doc.blocks;
+    g_doc.ApplyText("a\n\nb\n\nc\n\nd", nullptr); Sync();
+    CHECK(B.size() == 4 && B[1].label == "VERSE" && B[2].label == "CHORUS" && B[3].label == "OUTRO");
+    for (auto& b : B) CHECK(!b.customColor && b.color == LyricDoc::DefaultColorForLabel(b.label));
+
+    // rename VERSE -> "Verse 1" and -> CHORUS: stays light green
+    int green = B[1].color;
+    g_doc.SetLabel(1, "Verse 1", true); Sync();
+    CHECK(B[1].label == "Verse 1" && B[1].color == green);
+    g_doc.SetLabel(1, "CHORUS", true); Sync();
+    CHECK(B[1].label == "CHORUS" && B[1].color == green);
+    // picking a preset label for the OUTRO keeps it grey
+    int grey = B[3].color;
+    g_doc.SetLabel(3, "BRIDGE", true); Sync();
+    CHECK(B[3].color == grey);
+    // back to the automatic label: colour still unchanged
+    g_doc.SetLabel(1, "", false); Sync();
+    CHECK(B[1].label == "VERSE" && B[1].color == green);
+    // further typing (relabelling the automatic ones) leaves renamed blocks' colours alone
+    g_doc.ApplyText("a\n\nb\n\nx\n\nc\n\nd", nullptr); Sync();
+    CHECK(B.size() == 5 && B[1].color == green && B[4].label == "BRIDGE" && B[4].color == grey);
+    // a user-picked colour survives a rename and storage
+    int pink = rgb(230, 120, 170);
+    g_doc.SetColor(2, pink, true); Sync();
+    g_doc.SetLabel(2, "HOOK", true); Sync();
+    CHECK(B[2].label == "HOOK" && B[2].color == pink);
+    g_doc.Bind(kProj, t4);
+    CHECK(B[2].color == pink && B[1].color == green && B[4].color == grey);
+  }
+
   printf("%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

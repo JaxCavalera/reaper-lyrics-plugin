@@ -27,6 +27,7 @@ enum { MENU_RENAME = 1, MENU_DELETE, MENU_GOTO, MENU_LABEL_PRESET = 10, MENU_LAB
 
 struct ColorPreset { const char* name; COLORREF c; };
 static const ColorPreset kColors[] = {
+  { "Sky blue", RGB(110, 182, 236) }, { "Light green", RGB(128, 200, 128) }, { "Light orange", RGB(246, 176, 98) },
   { "Blue", RGB(74, 144, 217) }, { "Green", RGB(79, 157, 105) }, { "Orange", RGB(232, 146, 58) },
   { "Purple", RGB(166, 107, 190) }, { "Red", RGB(210, 80, 90) }, { "Yellow", RGB(217, 195, 74) },
   { "Teal", RGB(64, 180, 180) }, { "Pink", RGB(230, 120, 170) }, { "Grey", RGB(141, 141, 141) },
@@ -1015,6 +1016,23 @@ void LyricEditor::ShowBlockMenu(int block, POINT pt)
 
 // ------------------------------------------------------------------ rename
 
+DWORD LyricEditor::DoubleClickMs()
+{
+#ifdef _WIN32
+  return GetDoubleClickTime();
+#else
+  return 400;
+#endif
+}
+
+// the grip drawn at the right of a block's label chip (see PaintGutter)
+bool LyricEditor::OnChipGrip(int block, int x, int y) const
+{
+  if (block < 0 || block >= (int)m_layout.size()) return false;
+  int chipRight = (int)m_gutter.right - 16, y1 = m_text.LineY(m_layout[block].first);
+  return x >= chipRight - 18 && x < chipRight && y >= y1 && y < y1 + m_text.LineH();
+}
+
 void LyricEditor::BeginRename(int block)
 {
   if (block < 0 || block >= (int)m_layout.size() || block >= (int)g_doc.blocks.size()) return;
@@ -1131,7 +1149,19 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (y < m_toolbar.bottom) { int id = ButtonAt(x, y); if (id) OnButton(id); return 1; }
     if (x < m_gutter.right)
     {
-      m_dragBlock = BlockAtY(y); m_dragging = false; m_dragStart = { x, y };
+      int b = BlockAtY(y);
+      // second click on the same label chip: rename straight away (timed here as well, so it
+      // works whether or not the window gets WM_LBUTTONDBLCLK)
+      DWORD now = GetTickCount();
+      if (b >= 0 && b == m_chipClickBlock && now - m_chipClickTick <= DoubleClickMs()
+          && abs(x - m_chipClickPt.x) <= 6 && abs(y - m_chipClickPt.y) <= 6)
+      {
+        m_chipClickBlock = -1; m_dragBlock = -1;
+        BeginRename(b);
+        return 1;
+      }
+      m_chipClickBlock = b; m_chipClickTick = now; m_chipClickPt = { x, y };
+      m_dragBlock = b; m_dragging = false; m_dragStart = { x, y };
       if (m_dragBlock >= 0) SetCapture(h);
       return 1;
     }
@@ -1145,7 +1175,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (x < m_gutter.right && y >= m_gutter.top)
     {
       int b = BlockAtY(y);
-      if (b >= 0) { m_dragBlock = -1; if (GetCapture() == h) ReleaseCapture(); BeginRename(b); }
+      if (b >= 0) { m_dragBlock = -1; m_chipClickBlock = -1; if (GetCapture() == h) ReleaseCapture(); BeginRename(b); }
       return 1;
     }
     return 0;
@@ -1180,8 +1210,10 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     if (block >= 0)
     {
-      POINT pt = { x, y }; ClientToScreen(h, &pt);
-      ShowBlockMenu(block, pt);
+      // plain click: the menu from the grip (the lines at the right of the chip), otherwise
+      // select the block. Never a menu on the label itself, so a double-click can rename it.
+      if (OnChipGrip(block, x, y)) { m_chipClickBlock = -1; POINT pt = { x, y }; ClientToScreen(h, &pt); ShowBlockMenu(block, pt); }
+      else FocusBlockInText(block, 0);
       return 1;
     }
     return 0;

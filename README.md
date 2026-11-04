@@ -33,12 +33,15 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     to zoom around the mouse; the playhead is followed while playing with *Track* on;
   - the window is resizable from any edge or the grip in the bottom-right corner;
   - click a block or line to jump to it in the text; double-click a block or its label chip
-    to rename it; right-click for label presets, colour, delete;
+    to rename it straight away; right-click (or click the grip on the right of a label chip)
+    for label presets, colour, delete;
   - below the lane, the **lyric text**: one blank line starts a new block. Edits are diffed
     against the existing blocks so timings survive typing. Drag a label chip in the gutter
     up or down to move a whole block.
 - Labels follow **INTRO, VERSE, CHORUS, VERSE, CHORUS, … OUTRO** automatically until you
-  rename a block; colours follow the label until you pick one.
+  rename a block. A block starts in its label's default colour — **sky blue** INTRO,
+  **light green** VERSE, **light orange** CHORUS, **grey** OUTRO — and renaming it never
+  changes its colour; only picking a colour from the block menu does, and that colour stays.
 - **Default size: 2 bars per line.** A new block gets 2 bars for each of its lines, evenly
   spaced, and keeps growing or shrinking by 2 bars as you add or remove lines — the blocks
   after it move along, keeping their gaps. Once you resize it or move one of its lines by

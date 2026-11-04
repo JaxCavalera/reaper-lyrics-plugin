@@ -40,13 +40,13 @@ int LyricDoc::DefaultColorForLabel(const std::string& labelIn)
   std::string l = labelIn;
   for (auto& c : l) c = (char)toupper((unsigned char)c);
   int r = 74, g = 144, b = 217;
-  if (l.find("INTRO") != std::string::npos) { r = 108; g = 142; b = 191; }
+  if (l.find("INTRO") != std::string::npos) { r = 110; g = 182; b = 236; }        // sky blue
   else if (l.find("PRE") != std::string::npos) { r = 217; g = 195; b = 74; }
-  else if (l.find("CHORUS") != std::string::npos) { r = 232; g = 146; b = 58; }
-  else if (l.find("VERSE") != std::string::npos) { r = 79; g = 157; b = 105; }
+  else if (l.find("CHORUS") != std::string::npos) { r = 246; g = 176; b = 98; }  // light orange
+  else if (l.find("VERSE") != std::string::npos) { r = 128; g = 200; b = 128; }   // light green
   else if (l.find("BRIDGE") != std::string::npos) { r = 166; g = 107; b = 190; }
   else if (l.find("SOLO") != std::string::npos) { r = 210; g = 80; b = 90; }
-  else if (l.find("OUTRO") != std::string::npos) { r = 141; g = 141; b = 141; }
+  else if (l.find("OUTRO") != std::string::npos) { r = 141; g = 141; b = 141; }   // grey
   return ColorToNative(r, g, b) | 0x1000000;
 }
 
@@ -566,6 +566,7 @@ bool LyricDoc::SyncFromReaper()
     std::vector<LyricBlock> nb;
     Deserialize(doc, pos, nb);
     item = it; blocks = nb; m_written = doc; m_itemPos = pos; m_itemLen = len;
+    for (auto& b : blocks) if (!b.customColor) b.color = DefaultColorForLabel(b.label);   // current defaults
     m_tail = blocks.empty() ? 0 : std::max(0.0, pos + len - blocks.back().end);
     m_undoPending = false;
     if (blocks.empty())
@@ -833,7 +834,9 @@ void LyricDoc::SetLabel(int i, const std::string& label, bool custom)
   FlushUndo(true);
   blocks[i].customLabel = custom;
   blocks[i].label = custom ? label : AutoLabel(i, (int)blocks.size());
-  if (!blocks[i].customColor) blocks[i].color = DefaultColorForLabel(blocks[i].label);
+  // renaming never recolours: a renamed block keeps the colour it has now, for good
+  // (only the colour menu changes it)
+  if (custom) blocks[i].customColor = true;
   Write();
   UndoPoint("Lyrics: rename block");
 }

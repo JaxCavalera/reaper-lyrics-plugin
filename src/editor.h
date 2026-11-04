@@ -49,6 +49,8 @@ private:
   void ShowBlockMenu(int block, POINT screenPt);
   void ShowTrackMenu(POINT screenPt);
   void BeginRename(int block);
+  bool OnChipGrip(int block, int x, int y) const;
+  static DWORD DoubleClickMs();
   void CommitRename(bool apply);
   void FocusBlockInText(int block, int line);
   void Invalidate() { if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE); }
@@ -85,6 +87,7 @@ private:
   int m_curBlock = -1, m_curLine = -1, m_scrolledBlock = -1;
   int m_dragBlock = -1, m_dropIndex = -1; POINT m_dragStart = { 0, 0 }; bool m_dragging = false;
   bool m_textCapture = false;
+  int m_chipClickBlock = -1; DWORD m_chipClickTick = 0; POINT m_chipClickPt = { 0, 0 };   // double-click on a label
   unsigned long m_lastTrackScan = 0;
   LiveContext m_live;
 
