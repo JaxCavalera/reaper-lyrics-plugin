@@ -223,7 +223,7 @@ static bool ItemFits()
 {
   FakeItem* it = LyricItem();
   if (!it || g_doc.blocks.empty()) return false;
-  return Near(it->pos, g_doc.blocks.front().start) && it->pos + it->len >= g_doc.blocks.back().end - 1e-6;
+  return Near(it->pos, g_doc.blocks.front().start) && Near(it->pos + it->len, g_doc.blocks.back().end);   // exactly
 }
 
 static bool NoOverlaps()
@@ -321,14 +321,26 @@ int main()
     CHECK(Near(g_doc.blocks[0].start, s0));
     CHECK(Near(theItem->pos, s0) && Near(theItem->pos + theItem->len, end0));
   }
-  // --- right edge: shorter than the last block snaps back, longer is kept as empty space
+  // --- right edge: always snaps back to the end of the last block (no empty space at the end)
   {
     double lastEnd = g_doc.blocks.back().end;
     theItem->len = (lastEnd - theItem->pos) - 3.0; Bump(); Sync();
     CHECK(Near(theItem->pos + theItem->len, lastEnd));
     theItem->len = (lastEnd - theItem->pos) + 6.0; Bump(); Sync();
-    CHECK(Near(theItem->pos + theItem->len, lastEnd + 6.0));
+    CHECK(Near(theItem->pos + theItem->len, lastEnd));
     CHECK(Near(g_doc.blocks.back().end, lastEnd));
+    CHECK(ItemFits());
+    // the item follows the blocks: a longer last block, or a gap between two blocks
+    g_doc.DragBlockEdge((int)g_doc.blocks.size() - 1, false, lastEnd + 4.0); Sync();
+    CHECK(Near(g_doc.blocks.back().end, lastEnd + 4.0) && ItemFits());
+    double end1 = g_doc.blocks.back().end;
+    g_doc.DragBlockTo(1, g_doc.blocks[1].start + 2.0); Sync();
+    CHECK(ItemFits());
+    g_doc.DragBlockEdge((int)g_doc.blocks.size() - 1, false, end1 - 2.0); Sync();
+    CHECK(Near(g_doc.ItemEnd(), g_doc.blocks.back().end) && ItemFits());   // shorter last block: item shrinks too
+    // a project saved with space after the last block (earlier builds) is trimmed when read
+    theItem->len += 5.0; Bump();
+    g_doc.Bind(kProj, g_doc.track);
     CHECK(ItemFits());
   }
 

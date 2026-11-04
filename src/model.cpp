@@ -330,7 +330,7 @@ void LyricDoc::Unbind()
 {
   if (IsBound() && ValidatePtr2(proj, track, "MediaTrack*")) FlushUndo(true);
   proj = nullptr; track = nullptr; item = nullptr; blocks.clear(); lastStateCount = -1;
-  m_written.clear(); m_itemPos = m_itemLen = m_tail = 0; m_undoPending = false;
+  m_written.clear(); m_itemPos = m_itemLen = 0; m_undoPending = false;
 }
 
 bool LyricDoc::ValidateTrack()
@@ -372,7 +372,7 @@ double LyricDoc::PlayOrEditPos() const
 double LyricDoc::ItemStart() const { return blocks.empty() ? m_itemPos : blocks.front().start; }
 double LyricDoc::ItemEnd() const
 {
-  return blocks.empty() ? m_itemPos + m_itemLen : blocks.back().end + m_tail;
+  return blocks.empty() ? m_itemPos + m_itemLen : blocks.back().end;
 }
 
 int LyricDoc::FindBlockAt(double t, int* lineOut) const
@@ -487,13 +487,13 @@ void LyricDoc::Write()
     item = CreateNewMIDIItemInProj(track, s, e > s ? e : s + DefaultBlockLen(), nullptr);
     if (!item) return;
     SetupLyricTake(item);
-    m_itemPos = blocks.front().start; m_itemLen = 0; m_tail = 0;
+    m_itemPos = blocks.front().start; m_itemLen = 0;
     m_written.clear();
     created = true;
   }
-  // auto-fit: starts at the first block and ends at the last, plus any space the user added at the end
+  // auto-fit: the item starts at the first block and ends exactly at the last one
   double pos = blocks.front().start;
-  double end = blocks.back().end + m_tail;
+  double end = blocks.back().end;
   std::string doc = Serialize(blocks, pos);
   PreventUIRefresh(1);
   if (doc != m_written || created) SetItemString(item, kDocKey, doc);
@@ -592,7 +592,7 @@ bool LyricDoc::MigrateOldItems()
   PreventUIRefresh(1);
   for (int mid : deadMarkers) DeleteProjectMarker(proj, mid, false);
   for (MediaItem* it : old) DeleteTrackMediaItem(track, it);
-  item = nullptr; m_itemLen = 0; m_tail = 0;
+  item = nullptr; m_itemLen = 0;
   blocks = got;
   if (!blocks.empty())
   {
@@ -657,7 +657,6 @@ bool LyricDoc::SyncFromReaper()
     Deserialize(doc, pos, nb);
     item = it; blocks = nb; m_written = doc; m_itemPos = pos; m_itemLen = len;
     for (auto& b : blocks) if (!b.customColor) b.color = DefaultColorForLabel(b.label);   // current defaults
-    m_tail = blocks.empty() ? 0 : std::max(0.0, pos + len - blocks.back().end);
     m_undoPending = false;
     if (blocks.empty())
     {
@@ -665,10 +664,10 @@ bool LyricDoc::SyncFromReaper()
       LyricLine l; l.pos = b.start; b.lines.push_back(l);
       blocks.push_back(b);
       RelabelAuto();
-      m_tail = 0;
       needWrite = true;
     }
-    else if (std::fabs(pos - blocks.front().start) > kEps) needWrite = true;
+    else if (std::fabs(pos - blocks.front().start) > kEps || std::fabs(pos + len - blocks.back().end) > kEps)
+      needWrite = true;   // the item wraps the blocks exactly (older builds could leave space at the end)
     SyncTakeMarkers(it, BlockMarks(blocks));   // undo/redo restores them with the item; this is a no-op then
   }
   else
@@ -693,14 +692,11 @@ bool LyricDoc::SyncFromReaper()
       double d = pos - m_itemPos;
       for (auto& b : blocks) { b.start += d; b.end += d; for (auto& l : b.lines) l.pos += d; }
       m_itemPos = pos; m_itemLen = len;
-      if (!blocks.empty()) m_tail = std::max(0.0, pos + len - blocks.back().end);
-      needWrite = true;
+      needWrite = true;   // and the length snaps back to the blocks
     }
     else if (!sameLen)
     {
-      m_itemLen = len;    // right edge: longer keeps the extra space, shorter stops at the last block
-      if (!blocks.empty()) m_tail = std::max(0.0, pos + len - blocks.back().end);
-      if (!blocks.empty() && pos + len < blocks.back().end - kEps) needWrite = true;
+      needWrite = true;   // right edge dragged: it always ends at the last block, snap it back
     }
   }
   if (needWrite) Write();

@@ -610,7 +610,7 @@ void LyricEditor::FitView()
   int w = (int)(m_lane.right - m_lane.left);
   if (w < 80) return;   // not laid out yet: try again on the next paint
   double a, b;
-  if (g_doc.IsBound() && !g_doc.blocks.empty()) { a = g_doc.ItemStart(); b = g_doc.ItemEnd(); }
+  if (g_doc.IsBound() && !g_doc.blocks.empty()) { a = g_doc.blocks.front().start; b = g_doc.blocks.back().end; }   // the blocks, exactly
   else { a = g_doc.IsBound() ? GetCursorPositionEx(g_doc.proj) : 0.0; b = a + 30; }
   double span = std::max(b - a, 4.0);
   m_pxPerSec = std::max(2.0, (w - 48) / span);

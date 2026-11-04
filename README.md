@@ -26,8 +26,9 @@ lines are laid out in full colour and can be moved, stretched and reordered.
   changes stay. **Reset lyric track look** in the same dropdown applies it again.
 - **One lyric item per track.** It holds the whole lyric document (blocks, labels, colours,
   line timings) with times relative to the item, so moving the item moves the lyrics. It
-  auto-fits: it always starts at the first block and never ends before the last one (drag its
-  right edge further to leave space at the end). On the timeline it is an ordinary (empty
+  auto-fits: it always starts at the first block and ends exactly at the end of the last one,
+  so lengthening a block or opening a gap between blocks lengthens the item (dragging the
+  item's edges in REAPER snaps them back). On the timeline it is an ordinary (empty
   MIDI) item that shows only where each block starts: a take marker with the block's label
   in its colour, kept up to date as you edit. Nothing else is added to the main timeline —
   no project markers. (Lyric items from earlier builds were "empty items"; they are swapped

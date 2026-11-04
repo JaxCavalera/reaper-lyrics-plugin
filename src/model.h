@@ -141,6 +141,5 @@ private:
 
   std::string m_written;                // last LYRD value written/read
   double m_itemPos = 0, m_itemLen = 0;  // item geometry as last written/read
-  double m_tail = 0;                    // extra item length after the last block (user-dragged)
   bool m_undoPending = false; unsigned long m_lastTextEdit = 0;
 };
