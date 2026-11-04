@@ -25,6 +25,7 @@ struct LyricBlock
   bool customLabel = false;
   int color = 0;             // native|0x1000000
   bool customColor = false;
+  bool autoLen = false;      // still default-sized: 2 bars per line, grows/shrinks as lines are typed
   double start = 0, end = 0; // absolute project time
   std::vector<LyricLine> lines;
 
@@ -87,7 +88,8 @@ public:
   void EndDrag(const char* undoName);
 
   int FindBlockAt(double t, int* lineOut) const;
-  double DefaultBlockLen() const;
+  double LineSlot() const { return BarLen() * 2; }       // default length per lyric line
+  double DefaultBlockLen() const { return LineSlot(); }  // a new block with one line
   double BarLen() const;
   double MinBlockLen() const { return BarLen() / 4; }
   double MinLineLen() const { return 0.05; }
@@ -110,6 +112,8 @@ private:
   void Write();                         // model -> lyric item (creates it if needed)
   void RelabelAuto();
   void FixOverlaps();
+  void ShiftFrom(size_t first, double d);   // move blocks [first..] by d
+  void RelayoutAuto(LyricBlock& b);    // default-sized block: 2 bars per line, evenly spaced
   void NormaliseLines(LyricBlock& b);   // line0 = start, monotonic, inside [start,end]
   void ScaleLines(LyricBlock& b, double oldStart, double oldLen);
   void DiffLines(LyricBlock& b, const std::vector<std::string>& newLines, LiveContext* live, const LyricBlock* next);
@@ -117,5 +121,6 @@ private:
 
   std::string m_written;                // last LYRD value written/read
   double m_itemPos = 0, m_itemLen = 0;  // item geometry as last written/read
+  double m_tail = 0;                    // extra item length after the last block (user-dragged)
   bool m_undoPending = false; unsigned long m_lastTextEdit = 0;
 };

@@ -195,7 +195,7 @@ int main()
   CHECK(g_doc.blocks.size() == 1 && g_doc.blocks[0].label == "INTRO");
   CHECK(g_doc.ToText() == "");
   CHECK(OnlyTheLyricItem());
-  CHECK(Near(LyricItem()->pos, 10.0) && Near(LyricItem()->len, 16.0));   // edit cursor, 8 bars
+  CHECK(Near(LyricItem()->pos, 10.0) && Near(LyricItem()->len, 4.0));    // edit cursor, 2 bars (one line)
   CHECK(LyricDoc::IsLyricItem((MediaItem*)LyricItem()));
   CHECK(NoPlaceholder());
   FakeItem* theItem = LyricItem();
@@ -384,6 +384,59 @@ int main()
     CHECK(g_doc.blocks[1].label == "VERSE" && Near(g_doc.blocks[1].lines[1].pos, 44.5));
     CHECK(OnlyTheLyricItem());           // old items replaced by the one lyric item, markers gone
     CHECK(ItemFits() && Near(LyricItem()->pos, 20.0));
+  }
+
+  // --- default size: 2 bars per line; default-sized blocks grow/shrink as lines are typed and
+  //     carry the later blocks along (gaps kept); a block sized by hand stays put
+  {
+    const double slot = 4.0;   // 2 bars of 2 s
+    MediaTrack* t3 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 100.0;
+    g_doc.Bind(kProj, t3);
+    g_doc.AppendBlock(); Sync();
+    auto& B = g_doc.blocks;
+    CHECK(B.size() == 1 && Near(B[0].Len(), slot));
+    g_doc.ApplyText("one\ntwo\nthree", nullptr); Sync();
+    CHECK(Near(B[0].Len(), 3 * slot));
+    CHECK(Near(B[0].lines[1].pos, B[0].start + slot) && Near(B[0].lines[2].pos, B[0].start + 2 * slot));
+    g_doc.ApplyText("one\ntwo\nthree\n\nfour\n\nfive\nsix", nullptr); Sync();
+    CHECK(B.size() == 3);
+    CHECK(Near(B[1].start, B[0].end) && Near(B[1].Len(), slot));
+    CHECK(Near(B[2].start, B[1].end) && Near(B[2].Len(), 2 * slot));
+    CHECK(ItemFits() && Near(LyricItem()->pos + LyricItem()->len, B[2].end));
+
+    // open a gap before the last block, then grow the first: later blocks move, gap kept
+    g_doc.DragBlockTo(2, B[2].start + 3.0); g_doc.EndDrag("move");
+    double gap = B[2].start - B[1].end;
+    CHECK(Near(gap, 3.0));
+    g_doc.ApplyText("one\ntwo\nthree\nthree-and-a-half\n\nfour\n\nfive\nsix", nullptr); Sync();
+    CHECK(Near(B[0].Len(), 4 * slot));
+    CHECK(Near(B[1].start, B[0].end));
+    CHECK(Near(B[2].start - B[1].end, gap));
+    // shrinking pulls them back
+    g_doc.ApplyText("one\n\nfour\n\nfive\nsix", nullptr); Sync();
+    CHECK(Near(B[0].Len(), slot) && Near(B[1].start, B[0].end) && Near(B[2].start - B[1].end, gap));
+    CHECK(NoOverlaps() && ItemFits());
+
+    // a new block typed between two touching blocks gets 2 bars per line and pushes the rest
+    g_doc.DragBlockTo(2, B[1].end); g_doc.EndDrag("move");   // close the gap: blocks 1 and 2 touch
+    double s2 = B[2].start;
+    g_doc.ApplyText("one\n\nfour\n\nnew a\nnew b\n\nfive\nsix", nullptr); Sync();
+    CHECK(B.size() == 4 && B[2].Text() == "new a\nnew b");
+    CHECK(Near(B[2].start, B[1].end) && Near(B[2].Len(), 2 * slot));
+    CHECK(Near(B[3].start, s2 + 2 * slot));
+    CHECK(NoOverlaps() && ItemFits());
+
+    // sized by hand: no longer follows its line count
+    g_doc.DragBlockEdge(1, false, B[1].end + 2.0, false); g_doc.EndDrag("resize");
+    double len1 = B[1].Len(), s3 = B[2].start;
+    g_doc.ApplyText("one\n\nfour\nfour b\n\nnew a\nnew b\n\nfive\nsix", nullptr); Sync();
+    CHECK(Near(B[1].Len(), len1) && B[1].lines.size() == 2);
+    CHECK(Near(B[2].start, s3));
+    // the default-sized flag survives storage
+    g_doc.Bind(kProj, t3);
+    CHECK(B[0].autoLen && !B[1].autoLen && B[2].autoLen);
+    CHECK(OnlyTheLyricItem());
   }
 
   printf("%d passed, %d failed\n", g_pass, g_fail);

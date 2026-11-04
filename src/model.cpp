@@ -125,6 +125,7 @@ std::string LyricDoc::Serialize(const std::vector<LyricBlock>& blocks, double or
     s += "B " + Micros(b.start - origin) + " " + Micros(b.end - origin) + " " + FormatStr("%d", b.color) + " ";
     s += b.customLabel ? 'L' : '-';
     s += b.customColor ? 'C' : '-';
+    s += b.autoLen ? 'A' : '-';
     s += " " + OneLine(b.label) + "\n";
     for (auto& l : b.lines) s += "L " + Micros(l.pos - origin) + " " + OneLine(l.text) + "\n";
   }
@@ -152,6 +153,7 @@ bool LyricDoc::Deserialize(const std::string& stored, double origin, std::vector
       p = ce;
       while (*p == ' ') p++;
       if (p[0] && p[1]) { b.customLabel = p[0] == 'L'; b.customColor = p[1] == 'C'; p += 2; }
+      if (*p && *p != ' ') { b.autoLen = *p == 'A'; p++; }
       if (*p == ' ') p++;
       b.label = p;
       b.start = origin + s; b.end = origin + e;
@@ -267,7 +269,7 @@ void LyricDoc::Unbind()
 {
   if (IsBound() && ValidatePtr2(proj, track, "MediaTrack*")) FlushUndo(true);
   proj = nullptr; track = nullptr; item = nullptr; blocks.clear(); lastStateCount = -1;
-  m_written.clear(); m_itemPos = m_itemLen = 0; m_undoPending = false;
+  m_written.clear(); m_itemPos = m_itemLen = m_tail = 0; m_undoPending = false;
 }
 
 bool LyricDoc::ValidateTrack()
@@ -297,7 +299,6 @@ double LyricDoc::BarLen() const
   return d > 0.1 ? d : 2.0;
 }
 
-double LyricDoc::DefaultBlockLen() const { return BarLen() * 8; }
 
 bool LyricDoc::IsPlaying() const { return proj && (GetPlayStateEx(proj) & 1); }
 
@@ -310,8 +311,7 @@ double LyricDoc::PlayOrEditPos() const
 double LyricDoc::ItemStart() const { return blocks.empty() ? m_itemPos : blocks.front().start; }
 double LyricDoc::ItemEnd() const
 {
-  double e = m_itemPos + m_itemLen;
-  return blocks.empty() ? e : std::max(e, blocks.back().end);
+  return blocks.empty() ? m_itemPos + m_itemLen : blocks.back().end + m_tail;
 }
 
 int LyricDoc::FindBlockAt(double t, int* lineOut) const
@@ -373,6 +373,24 @@ void LyricDoc::RelabelAuto()
 // A block never extends past the start of the block after it: an overlapping end is trimmed
 // to the next start (lines scale with it). If that would leave less than a quarter bar, the
 // next block is pushed later instead (and the check carries on down the list).
+void LyricDoc::ShiftFrom(size_t first, double d)
+{
+  for (size_t j = first; j < blocks.size(); j++)
+  {
+    LyricBlock& n = blocks[j];
+    n.start += d; n.end += d;
+    for (auto& l : n.lines) l.pos += d;
+  }
+}
+
+void LyricDoc::RelayoutAuto(LyricBlock& b)
+{
+  if (b.lines.empty()) { LyricLine l; b.lines.push_back(l); }
+  double slot = LineSlot();
+  b.end = b.start + slot * (double)b.lines.size();
+  for (size_t i = 0; i < b.lines.size(); i++) b.lines[i].pos = b.start + slot * (double)i;
+}
+
 void LyricDoc::FixOverlaps()
 {
   double minLen = MinBlockLen();
@@ -405,13 +423,13 @@ void LyricDoc::Write()
   if (!item || !ValidatePtr2(proj, item, "MediaItem*") || GetMediaItem_Track(item) != track)
   {
     item = AddMediaItemToTrack(track);
-    m_itemPos = blocks.front().start; m_itemLen = 0;
+    m_itemPos = blocks.front().start; m_itemLen = 0; m_tail = 0;
     m_written.clear();
     created = true;
   }
-  // auto-fit: starts at the first block, never ends before the last (extra space at the end is kept)
+  // auto-fit: starts at the first block and ends at the last, plus any space the user added at the end
   double pos = blocks.front().start;
-  double end = std::max(blocks.back().end, m_itemPos + m_itemLen);
+  double end = blocks.back().end + m_tail;
   std::string doc = Serialize(blocks, pos);
   PreventUIRefresh(1);
   if (created) SetItemString(item, "P_NAME", kItemName);
@@ -509,7 +527,7 @@ bool LyricDoc::MigrateOldItems()
   PreventUIRefresh(1);
   for (int mid : deadMarkers) DeleteProjectMarker(proj, mid, false);
   for (MediaItem* it : old) DeleteTrackMediaItem(track, it);
-  item = nullptr; m_itemLen = 0;
+  item = nullptr; m_itemLen = 0; m_tail = 0;
   blocks = got;
   if (!blocks.empty())
   {
@@ -548,6 +566,7 @@ bool LyricDoc::SyncFromReaper()
     std::vector<LyricBlock> nb;
     Deserialize(doc, pos, nb);
     item = it; blocks = nb; m_written = doc; m_itemPos = pos; m_itemLen = len;
+    m_tail = blocks.empty() ? 0 : std::max(0.0, pos + len - blocks.back().end);
     m_undoPending = false;
     if (blocks.empty())
     {
@@ -555,6 +574,7 @@ bool LyricDoc::SyncFromReaper()
       LyricLine l; l.pos = b.start; b.lines.push_back(l);
       blocks.push_back(b);
       RelabelAuto();
+      m_tail = 0;
       needWrite = true;
     }
     else if (std::fabs(pos - blocks.front().start) > kEps) needWrite = true;
@@ -581,11 +601,13 @@ bool LyricDoc::SyncFromReaper()
       double d = pos - m_itemPos;
       for (auto& b : blocks) { b.start += d; b.end += d; for (auto& l : b.lines) l.pos += d; }
       m_itemPos = pos; m_itemLen = len;
+      if (!blocks.empty()) m_tail = std::max(0.0, pos + len - blocks.back().end);
       needWrite = true;
     }
     else if (!sameLen)
     {
       m_itemLen = len;    // right edge: longer keeps the extra space, shorter stops at the last block
+      if (!blocks.empty()) m_tail = std::max(0.0, pos + len - blocks.back().end);
       if (!blocks.empty() && pos + len < blocks.back().end - kEps) needWrite = true;
     }
   }
@@ -657,6 +679,7 @@ void LyricDoc::DiffLines(LyricBlock& b, const std::vector<std::string>& newLines
     {
       result[i].pos = live->pos;
       live->valid = false; pendingUsed = true;
+      b.autoLen = false;   // timed live: no longer default-sized
       if (b.end < live->pos + BarLen()) b.end = live->pos + BarLen();
       if (next && b.end > next->start) b.end = next->start;
       continue;
@@ -719,26 +742,27 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live)
     if (s.isNew)
     {
       LyricBlock nb;
-      double def = DefaultBlockLen();
+      double len = LineSlot() * (double)std::max<size_t>(1, s.lines.size());
       if (live && live->valid && (GetTickCount() - live->stamp < 20000) && (!prev || live->pos >= prev->start) && (!next || live->pos < next->start))
       {
+        // live typing: the block starts at the stamped play position
         nb.start = live->pos;
         live->valid = false;
-        if (prev) { prev->end = nb.start; NormaliseLines(*prev); }
-        nb.end = nb.start + def;
+        if (prev) { prev->end = nb.start; prev->autoLen = false; NormaliseLines(*prev); }
+        nb.end = nb.start + len;
         if (next && nb.end > next->start) nb.end = next->start;
       }
-      else if (prev && next && next->start > prev->end + 0.5) { nb.start = prev->end; nb.end = next->start; }
-      else if (prev && next)
+      else
       {
-        double os = prev->start, ol = prev->Len();
-        nb.start = prev->start + ol / 2; nb.end = prev->end;
-        prev->end = nb.start; ScaleLines(*prev, os, ol);
+        // default size, 2 bars per line, straight after the previous block; blocks after it
+        // are pushed along below if it doesn't fit
+        nb.autoLen = true;
+        if (prev) nb.start = prev->end;
+        else if (next) nb.start = std::max(0.0, next->start - len);
+        else nb.start = GetCursorPositionEx(proj);
+        nb.end = nb.start + len;
       }
-      else if (prev) { nb.start = prev->end; nb.end = nb.start + def; }
-      else if (next) { nb.start = next->start - def; if (nb.start < 0) nb.start = 0; nb.end = next->start; }
-      else { nb.start = GetCursorPositionEx(proj); nb.end = nb.start + def; }
-      if (nb.end <= nb.start + kEps) nb.end = nb.start + def;
+      if (nb.end <= nb.start + kEps) nb.end = nb.start + len;
       LyricBlock empty = nb;
       DiffLines(empty, s.lines, nullptr, next);
       nb.lines = empty.lines;
@@ -752,6 +776,19 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live)
     }
   }
   blocks = result;
+  // default-sized blocks follow their line count; the blocks after one that grew or shrank
+  // move by the same amount (gaps kept)
+  for (size_t i = 0; i < blocks.size(); i++)
+  {
+    if (!blocks[i].autoLen) continue;
+    double oldEnd = blocks[i].end;
+    RelayoutAuto(blocks[i]);
+    double d = blocks[i].end - oldEnd;
+    if (std::fabs(d) > kEps) ShiftFrom(i + 1, d);
+  }
+  // a block that doesn't fit before the next one pushes it (and everything after) along
+  for (size_t i = 0; i + 1 < blocks.size(); i++)
+    if (blocks[i + 1].start < blocks[i].end - kEps) ShiftFrom(i + 1, blocks[i].end - blocks[i + 1].start);
   RelabelAuto();
   FixOverlaps();
   Write();
@@ -832,7 +869,8 @@ void LyricDoc::AppendBlock(double atPos)
   if (!ValidateTrack() || !blocks.empty()) return;   // only the first block is created empty
   LyricBlock nb;
   nb.start = atPos >= 0 ? atPos : GetCursorPositionEx(proj);
-  nb.end = nb.start + DefaultBlockLen();
+  nb.end = nb.start + LineSlot();
+  nb.autoLen = true;
   LyricLine l; l.pos = nb.start; nb.lines.push_back(l);
   blocks.push_back(nb);
   RelabelAuto();
@@ -865,20 +903,13 @@ void LyricDoc::DragBlockEdge(int i, bool left, double t, bool ripple)
   if (!ValidateTrack() || i < 0 || i >= (int)blocks.size()) return;
   LyricBlock& b = blocks[i];
   double os = b.start, ol = b.Len();
+  b.autoLen = false;   // sized by hand from now on
   if (!left && ripple)
   {
     b.end = std::max(t, b.start + MinBlockLen());
     ScaleLines(b, os, ol);
-    if (i + 1 < (int)blocks.size())
-    {
-      double d = b.end - blocks[i + 1].start;   // snap the next block against this one...
-      for (size_t j = i + 1; j < blocks.size(); j++)   // ...and carry the rest along, gaps intact
-      {
-        LyricBlock& n = blocks[j];
-        n.start += d; n.end += d;
-        for (auto& l : n.lines) l.pos += d;
-      }
-    }
+    // snap the next block against this one and carry the rest along, gaps intact
+    if (i + 1 < (int)blocks.size()) ShiftFrom(i + 1, b.end - blocks[i + 1].start);
     Write();
     return;
   }
@@ -910,6 +941,7 @@ void LyricDoc::DragLineStart(int bi, int li, double t)
   double p = std::min(std::max(t, lo), hi);
   if (std::fabs(p - b.lines[li].pos) < 1e-9) return;
   b.lines[li].pos = p;
+  b.autoLen = false;
   Write();
 }
 

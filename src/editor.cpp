@@ -8,8 +8,9 @@
 static const int kToolbarH = 38;
 static const int kGutterW = 150;
 // sequencer lane: ruler, block row, line row
-static const int kRulerH = 20, kBlockRowH = 40, kLineRowH = 54, kLanePad = 4;
-static const int kLaneH = kRulerH + kLanePad + kBlockRowH + kLanePad + kLineRowH + kLanePad + 2;
+static const int kRulerH = 20, kBlockRowH = 40, kLineRowH = 54, kLanePad = 4, kScrollH = 12;
+static const int kLaneH = kRulerH + kLanePad + kBlockRowH + kLanePad + kLineRowH + kLanePad + kScrollH + 2;
+static const int kGripSize = 16;
 static const COLORREF kLaneBg = RGB(20, 20, 20);
 static const COLORREF kRulerBg = RGB(34, 34, 34);
 static const COLORREF kItemSpanBg = RGB(28, 30, 34);
@@ -352,6 +353,7 @@ void LyricEditor::Paint(HDC dc)
   PaintLane(dc);
   PaintToolbar(dc);
   if (m_renaming) m_rename.Paint(dc);
+  PaintGrip(dc);
 }
 
 void LyricEditor::PaintToolbar(HDC dc)
@@ -519,6 +521,7 @@ void LyricEditor::ZoomAt(int x, double factor)
   double t = XToTime(x);
   m_pxPerSec = std::min(4000.0, std::max(1.0, m_pxPerSec * factor));
   m_viewStart = t - (double)(x - m_lane.left) / m_pxPerSec;
+  ClampView();
   Invalidate();
 }
 
@@ -534,6 +537,69 @@ void LyricEditor::FollowPlayhead()
   }
 }
 
+void LyricEditor::ClampView()
+{
+  double minStart = -24.0 / m_pxPerSec;   // a little margin before project start
+  if (m_viewStart < minStart) m_viewStart = minStart;
+}
+
+// Scrollable range: project start to a bit past the lyric item (or the cursor / playhead),
+// always including the current view.
+void LyricEditor::LaneRange(double* lo, double* hi) const
+{
+  double span = (double)(m_lane.right - m_lane.left) / m_pxPerSec;
+  double a = -24.0 / m_pxPerSec, b = 60.0;
+  if (g_doc.IsBound())
+  {
+    if (!g_doc.blocks.empty()) b = std::max(b, g_doc.ItemEnd() + 30.0);
+    b = std::max(b, GetCursorPositionEx(g_doc.proj) + 10.0);
+    if (g_doc.IsPlaying()) b = std::max(b, GetPlayPosition2Ex(g_doc.proj) + 10.0);
+  }
+  *lo = std::min(a, m_viewStart);
+  *hi = std::max(b, m_viewStart + span);
+}
+
+RECT LyricEditor::ScrollbarRect() const
+{
+  RECT r = { m_lane.left, m_lane.bottom - 2 - kScrollH, m_lane.right, m_lane.bottom - 2 };
+  return r;
+}
+
+RECT LyricEditor::ThumbRect(double lo, double hi) const
+{
+  RECT sb = ScrollbarRect();
+  int w = (int)(sb.right - sb.left);
+  double total = std::max(1e-6, hi - lo);
+  double span = (double)(m_lane.right - m_lane.left) / m_pxPerSec;
+  int tw = std::max(24, (int)(w * std::min(1.0, span / total)));
+  int tx = (int)sb.left + (int)((w - tw) * std::min(1.0, std::max(0.0, (m_viewStart - lo) / std::max(1e-6, total - span))));
+  RECT t = { tx, sb.top + 2, tx + tw, sb.bottom - 2 };
+  return t;
+}
+
+void LyricEditor::PaintScrollbar(HDC dc)
+{
+  RECT sb = ScrollbarRect();
+  FillRectColor(dc, sb, RGB(26, 26, 26));
+  double lo, hi;
+  if (m_laneDrag == HIT_SCROLL) { lo = m_scrollLo; hi = m_scrollHi; } else LaneRange(&lo, &hi);
+  RECT t = ThumbRect(lo, hi);
+  RoundRectColor(dc, t, m_laneDrag == HIT_SCROLL ? RGB(130, 130, 130) : RGB(88, 88, 88), 6);
+}
+
+// bottom-right resize grip (the window is resizable from any edge; this makes it obvious)
+void LyricEditor::PaintGrip(HDC dc)
+{
+  RECT rc; GetClientRect(m_hwnd, &rc);
+  for (int i = 0; i < 3; i++)
+    for (int j = 0; j <= i; j++)
+    {
+      int x = rc.right - 4 - (i - j) * 4, y = rc.bottom - 4 - j * 4;
+      RECT d = { x - 2, y - 2, x, y };
+      FillRectColor(dc, d, RGB(120, 120, 120));
+    }
+}
+
 void LyricEditor::PaintLane(HDC dc)
 {
   if (m_needFit) FitView();
@@ -547,6 +613,7 @@ void LyricEditor::PaintLane(HDC dc)
   SetBkMode(dc, TRANSPARENT);
   RECT border = { r.left, r.bottom - 2, r.right, r.bottom };
   FillRectColor(dc, border, RGB(52, 52, 52));
+  PaintScrollbar(dc);
   if (!g_doc.IsBound())
   {
     SetTextColor(dc, kDim);
@@ -664,6 +731,8 @@ LyricEditor::LaneHitKind LyricEditor::LaneHit(int x, int y, int* block, int* lin
   *block = -1; *line = -1;
   if (x < m_lane.left || x >= m_lane.right || y < m_lane.top || y >= m_lane.bottom) return HIT_NONE;
   if (y < m_lane.top + kRulerH) return HIT_RULER;
+  RECT sb = ScrollbarRect();
+  if (y >= sb.top && y < sb.bottom) return HIT_SCROLL;
   if (!g_doc.IsBound()) return HIT_EMPTY;
   int by0 = LaneBlockTop(m_lane), by1 = by0 + kBlockRowH, ly0 = LaneLineTop(m_lane), ly1 = ly0 + kLineRowH;
   bool inBlocks = y >= by0 - 2 && y < by1 + 2, inLines = y >= ly0 - 2 && y < ly1 + 2;
@@ -722,6 +791,18 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
     if (k == HIT_NONE) return false;
     SetFocus(m_hwnd);
     if (m_renaming) CommitRename(true);
+    if (k == HIT_SCROLL)
+    {
+      LaneRange(&m_scrollLo, &m_scrollHi);
+      RECT th = ThumbRect(m_scrollLo, m_scrollHi);
+      double span = (double)(m_lane.right - m_lane.left) / m_pxPerSec;
+      if (x < th.left) m_viewStart -= span * 0.9;          // page left/right on the trough
+      else if (x >= th.right) m_viewStart += span * 0.9;
+      else { m_laneDrag = HIT_SCROLL; m_scrollGrab = x - (int)th.left; SetCapture(m_hwnd); }
+      ClampView();
+      Invalidate();
+      return true;
+    }
     if (!g_doc.IsBound()) return true;
     g_doc.FlushUndo(true);
     m_laneDown = { x, y }; m_laneMoved = false; m_laneBlock = b; m_laneLine = l; m_laneDrop = -1;
@@ -742,6 +823,18 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
   case WM_MOUSEMOVE:
   {
     if (m_laneDrag == HIT_NONE) return false;
+    if (m_laneDrag == HIT_SCROLL)
+    {
+      RECT sb = ScrollbarRect(), th = ThumbRect(m_scrollLo, m_scrollHi);
+      int track = (int)(sb.right - sb.left) - (int)(th.right - th.left);
+      double span = (double)(m_lane.right - m_lane.left) / m_pxPerSec;
+      double frac = track > 0 ? (double)(x - m_scrollGrab - sb.left) / track : 0.0;
+      frac = std::min(1.0, std::max(0.0, frac));
+      m_viewStart = m_scrollLo + frac * std::max(0.0, (m_scrollHi - m_scrollLo) - span);
+      ClampView();
+      Invalidate();
+      return true;
+    }
     if (!m_laneMoved && std::abs(x - m_laneDown.x) < 3) return true;
     m_laneMoved = true;
     double t = XToTime(x);
@@ -764,7 +857,7 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
     m_laneDrag = HIT_NONE;
     if (GetCapture() == m_hwnd) ReleaseCapture();
     int drop = m_laneDrop; m_laneDrop = -1;
-    if (k == HIT_RULER) {}
+    if (k == HIT_RULER || k == HIT_SCROLL) {}
     else if (!m_laneMoved) FocusBlockInText(m_laneBlock, k == HIT_LINE || k == HIT_LINE_EDGE ? m_laneLine : 0);
     else if (k == HIT_BLOCK && drop >= 0) { g_doc.MoveBlock(m_laneBlock, drop); RefreshText(); }
     else if (k == HIT_BLOCK) g_doc.EndDrag("Lyrics: move block");
@@ -777,6 +870,7 @@ bool LyricEditor::OnLaneMouse(UINT msg, WPARAM wp, int x, int y)
   {
     LaneHitKind k = LaneHit(x, y, &b, &l);
     if (k == HIT_NONE) return false;
+    if (k == HIT_SCROLL) return true;
     if (k == HIT_BLOCK && b >= 0) { FocusBlockInText(b, 0); BeginRename(b); }
     else if (k == HIT_LINE && b >= 0) FocusBlockInText(b, l);
     return true;
@@ -953,6 +1047,15 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 #ifdef _WIN32
   case WM_GETMINMAXINFO: { MINMAXINFO* mi = (MINMAXINFO*)lp; mi->ptMinTrackSize.x = 640; mi->ptMinTrackSize.y = 420; return 0; }
   case WM_ERASEBKGND: SetWindowLongPtr(h, DWLP_MSGRESULT, 1); return 1;
+  case WM_NCHITTEST:
+  {
+    // the bottom-right grip resizes the window
+    POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) }; ScreenToClient(h, &pt);
+    RECT rc; GetClientRect(h, &rc);
+    if (pt.x >= rc.right - kGripSize && pt.y >= rc.bottom - kGripSize && pt.x < rc.right && pt.y < rc.bottom)
+    { SetWindowLongPtr(h, DWLP_MSGRESULT, HTBOTTOMRIGHT); return 1; }
+    return 0;
+  }
   // the dialog manager otherwise treats typed characters as mnemonics and drops them
   case WM_GETDLGCODE: SetWindowLongPtr(h, DWLP_MSGRESULT, DLGC_WANTALLKEYS | DLGC_WANTCHARS | DLGC_WANTARROWS | DLGC_WANTTAB); return 1;
 #else
@@ -976,6 +1079,9 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   }
   case WM_SETCURSOR:
   {
+#ifdef _WIN32
+    if (LOWORD(lp) != HTCLIENT) return 0;   // borders/caption: default cursors (resize arrows)
+#endif
     POINT pt; GetCursorPos(&pt); ScreenToClient(h, &pt);
     int hb, hl;
     LaneHitKind lk = m_laneDrag != HIT_NONE ? m_laneDrag : LaneHit(pt.x, pt.y, &hb, &hl);
@@ -1086,7 +1192,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     {
       // lane: wheel scrolls in time, Ctrl+wheel zooms around the pointer
       if (CtrlDown()) ZoomAt(pt.x, std::pow(1.25, delta / 120.0));
-      else { m_viewStart -= (delta / 120.0) * 80.0 / m_pxPerSec; Invalidate(); }
+      else { m_viewStart -= (delta / 120.0) * 80.0 / m_pxPerSec; ClampView(); Invalidate(); }
       return 1;
     }
     m_text.OnWheel(delta);

@@ -26,7 +26,7 @@ public:
 private:
   struct Layout { int first = 0, last = 0; };          // text-line indices of a block
   struct Button { RECT r; std::string text; int id; bool toggle; };
-  enum LaneHitKind { HIT_NONE, HIT_RULER, HIT_EMPTY, HIT_BLOCK, HIT_BLOCK_LEFT, HIT_BLOCK_RIGHT, HIT_LINE_EDGE, HIT_LINE };
+  enum LaneHitKind { HIT_NONE, HIT_RULER, HIT_EMPTY, HIT_BLOCK, HIT_BLOCK_LEFT, HIT_BLOCK_RIGHT, HIT_LINE_EDGE, HIT_LINE, HIT_SCROLL };
 
   LyricEditor();
   void Create();
@@ -64,6 +64,12 @@ private:
   int ReorderTarget(int block, double t) const;   // insertion index if dropping at t reorders, else -1
   bool OnLaneMouse(UINT msg, WPARAM wp, int x, int y);
   void ZoomAt(int x, double factor);
+  void ClampView();
+  void LaneRange(double* lo, double* hi) const;    // scrollable time range
+  RECT ScrollbarRect() const;
+  RECT ThumbRect(double lo, double hi) const;
+  void PaintScrollbar(HDC dc);
+  void PaintGrip(HDC dc);
 
   HWND m_hwnd = nullptr;
   TextEdit m_text;
@@ -87,4 +93,5 @@ private:
   double m_laneGrab = 0; bool m_laneMoved = false; POINT m_laneDown = { 0, 0 };
   int m_laneDrop = -1;
   double m_lastPlayDrawn = -1;
+  double m_scrollLo = 0, m_scrollHi = 0; int m_scrollGrab = 0;   // range + grab offset while dragging the thumb
 };
