@@ -96,6 +96,28 @@ static void SetItemString(MediaItem* it, const char* key, const std::string& v)
   GetSetMediaItemInfo_String(it, key, b.data(), true);
 }
 
+// What the lyric item shows on the timeline: it has no take, so REAPER draws its notes.
+// One line, block by block: "INTRO: line / line  |  VERSE: line / line".
+std::string LyricDoc::ItemNotes(const std::vector<LyricBlock>& blocks)
+{
+  std::string out;
+  for (auto& b : blocks)
+  {
+    std::string lines;
+    for (auto& l : b.lines)
+    {
+      std::string t = Trim(l.text);
+      if (t.empty()) continue;
+      if (!lines.empty()) lines += " / ";
+      lines += t;
+    }
+    if (lines.empty()) continue;
+    if (!out.empty()) out += "  |  ";
+    out += b.label.empty() ? lines : b.label + ": " + lines;
+  }
+  return out.empty() ? std::string(kItemName) : out;
+}
+
 // Times are stored as integer microseconds relative to the item start: no locale-dependent
 // decimal separators in the project file.
 static std::string Micros(double t) { return FormatStr("%lld", (long long)std::llround(t * 1e6)); }
@@ -434,7 +456,11 @@ void LyricDoc::Write()
   std::string doc = Serialize(blocks, pos);
   PreventUIRefresh(1);
   if (created) SetItemString(item, "P_NAME", kItemName);
-  if (doc != m_written) SetItemString(item, kDocKey, doc);
+  if (doc != m_written || created)
+  {
+    SetItemString(item, kDocKey, doc);
+    SetItemString(item, "P_NOTES", ItemNotes(blocks));
+  }
   if (created || std::fabs(GetMediaItemInfo_Value(item, "D_POSITION") - pos) > 1e-9) SetMediaItemInfo_Value(item, "D_POSITION", pos);
   if (created || std::fabs(GetMediaItemInfo_Value(item, "D_LENGTH") - (end - pos)) > 1e-9) SetMediaItemInfo_Value(item, "D_LENGTH", end - pos);
   PreventUIRefresh(-1);
@@ -580,6 +606,9 @@ bool LyricDoc::SyncFromReaper()
       needWrite = true;
     }
     else if (std::fabs(pos - blocks.front().start) > kEps) needWrite = true;
+    // lyric items from earlier builds have no notes yet (undo/redo restores them with the item)
+    std::string notes = ItemNotes(blocks);
+    if (ItemString(it, "P_NOTES") != notes) SetItemString(it, "P_NOTES", notes);
   }
   else
   {

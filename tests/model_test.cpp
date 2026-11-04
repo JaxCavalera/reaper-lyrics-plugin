@@ -149,12 +149,13 @@ static FakeItem* LyricItem() { return LyricTrack()->items.empty() ? nullptr : Ly
 static std::string ItemStr(FakeItem* i, const char* k) { auto it = i->str.find(k); return it == i->str.end() ? "" : it->second; }
 static void Sync() { if (g_doc.NeedsSync()) g_doc.SyncFromReaper(); }
 
-// Nothing on the main timeline but the one lyric item: no project markers, one item, no notes text.
+// Nothing on the main timeline but the one lyric item: no project markers, one item, showing
+// the current lyrics as its text.
 static bool OnlyTheLyricItem()
 {
   if (!g_markers.empty() || LyricTrack()->items.size() != 1) return false;
   FakeItem* it = LyricItem();
-  return ItemStr(it, "P_NOTES").empty() && !ItemStr(it, "P_EXT:LYRD").empty() && ItemStr(it, "P_NAME") == "Lyrics";
+  return ItemStr(it, "P_NOTES") == LyricDoc::ItemNotes(g_doc.blocks) && !ItemStr(it, "P_EXT:LYRD").empty();
 }
 
 // The item starts at the first block and doesn't end before the last.
@@ -498,6 +499,24 @@ int main()
     CHECK(B[2].label == "HOOK" && B[2].color == pink);
     g_doc.Bind(kProj, t4);
     CHECK(B[2].color == pink && B[1].color == green && B[4].color == bridge);
+  }
+
+  // --- the lyric item shows the lyrics on the timeline (never "Empty Item")
+  {
+    MediaTrack* t5 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 500.0;
+    g_doc.Bind(kProj, t5);
+    g_doc.AppendBlock(); Sync();
+    CHECK(ItemStr(LyricItem(), "P_NOTES") == "Lyrics");                     // nothing typed yet
+    g_doc.ApplyText("hello\nworld\n\nsecond", nullptr); Sync();
+    CHECK(ItemStr(LyricItem(), "P_NOTES") == "INTRO: hello / world  |  VERSE: second");
+    g_doc.SetLabel(1, "HOOK", true); Sync();
+    CHECK(ItemStr(LyricItem(), "P_NOTES") == "INTRO: hello / world  |  HOOK: second");
+    // a lyric item from an earlier build (no notes) gets them when it is read
+    LyricItem()->str.erase("P_NOTES"); Bump();
+    g_doc.Bind(kProj, t5);
+    CHECK(ItemStr(LyricItem(), "P_NOTES") == "INTRO: hello / world  |  HOOK: second");
+    CHECK(OnlyTheLyricItem());
   }
 
   // --- lyric track look: theme layout, hidden in mixer, fixed height, colour, no recording

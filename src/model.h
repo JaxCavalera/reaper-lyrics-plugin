@@ -121,6 +121,7 @@ public:
 
   // serialisation (public for tests)
   static std::string Serialize(const std::vector<LyricBlock>& blocks, double origin);
+  static std::string ItemNotes(const std::vector<LyricBlock>& blocks);   // timeline text of the lyric item
   static bool Deserialize(const std::string& s, double origin, std::vector<LyricBlock>& out);
 
 private:
