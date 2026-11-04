@@ -86,6 +86,16 @@ if(LYRICS_BUILD_TESTS)
   endif()
 endif()
 
+# Windows: the README / release screenshot (tools/screenshot.ps1 builds and runs it)
+if(LYRICS_BUILD_TESTS AND WIN32)
+  add_executable(lyrics_screenshot tools/screenshot.cpp src/model.cpp src/trackstyle.cpp src/util.cpp
+    src/textedit.cpp src/platform.cpp src/panel.cpp src/editor.cpp src/resource.rc WDL/WDL/win32_utf8.c)
+  target_include_directories(lyrics_screenshot PRIVATE reaper-sdk/sdk src WDL/WDL tests)
+  target_compile_definitions(lyrics_screenshot PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+  target_compile_options(lyrics_screenshot PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W3 /utf-8 /EHsc> $<$<COMPILE_LANGUAGE:C>:/w>)
+  target_link_libraries(lyrics_screenshot PRIVATE gdi32 user32 comdlg32)
+endif()
+
 # `cmake --build build --target install_to_reaper` copies the plugin into UserPlugins
 add_custom_target(install_to_reaper
   COMMAND ${CMAKE_COMMAND} -E make_directory "${INSTALL_DIR}"

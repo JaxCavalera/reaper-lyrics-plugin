@@ -17,6 +17,7 @@ public:
   void Toggle() { Show(!IsVisible()); }
   bool IsVisible() const;
   void OnTimer();
+  HWND Hwnd() const { return m_hwnd; }
 
 private:
   LyricsPanel() {}

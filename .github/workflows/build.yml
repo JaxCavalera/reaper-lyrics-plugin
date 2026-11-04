@@ -98,6 +98,9 @@ jobs:
           installs. The Linux build runs on Ubuntu 20.04 / Debian 11 or newer (or any distro
           with glibc 2.31+); on anything else, build from source (see the README).
           EOF
+          # the screenshot as of this version, above the install steps
+          { printf '![REAPER Lyrics: the lyrics panel and the lyric sequencer](https://raw.githubusercontent.com/%s/%s/docs/screenshot.png)\n\n' "$GITHUB_REPOSITORY" "$TAG"; cat notes.md; } > notes-full.md
+          mv notes-full.md notes.md
           gh release create "$TAG" \
             dist/windows-x64/reaper_lyrics.dll \
             dist/linux-x86_64/reaper_lyrics.so \

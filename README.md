@@ -9,6 +9,11 @@ lines are laid out in full colour and can be moved, stretched and reordered.
 [Releases page](https://github.com/JaxCavalera/reaper-lyrics-plugin/releases) (see
 [Releases](#releases) below), or build it yourself.
 
+![The lyrics panel showing the current chorus line, above the lyric sequencer with its coloured blocks, line timeline and lyric text](docs/screenshot.png)
+
+*The lyrics panel (top) follows the current line; the lyric sequencer (below) shows the
+blocks and their lines on a timeline above the lyric text. (Lorem ipsum lyrics.)*
+
 ## What you get
 
 - **Insert lyric track** in the track-panel right-click menu (next to *Insert track from
@@ -222,7 +227,8 @@ Shift+Enter a soft line (see above). Double-click selects a word, triple-click t
 
 ```
 src/main.cpp        plugin entry, actions, context-menu hook, item double-click hook, timer
-tests/model_test.cpp  model tests against a fake REAPER API
+tests/model_test.cpp  model tests against a fake REAPER API (tests/fake_reaper.h)
+tools/screenshot.*  regenerates docs/screenshot.png: the real windows on a lorem ipsum song (Windows)
 src/model.*         lyric document, its storage in the lyric item, sync with REAPER
 src/editor.*        lyric sequencer: toolbar, timeline lane, label gutter, text area
 src/textedit.*      self-drawn text widget (selection, clipboard, undo, scrolling)
