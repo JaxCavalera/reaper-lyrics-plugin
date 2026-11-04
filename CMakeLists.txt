@@ -46,6 +46,28 @@ else()
   set(PLUGIN_FILE "reaper_lyrics.so")
 endif()
 
+# Model tests against a fake REAPER API:
+#   cmake -S . -B build -DLYRICS_BUILD_TESTS=ON && cmake --build build --config Release --target model_test
+option(LYRICS_BUILD_TESTS "Build the model tests" OFF)
+if(LYRICS_BUILD_TESTS)
+  set(TEST_SOURCES tests/model_test.cpp src/model.cpp src/util.cpp)
+  if(WIN32)
+    list(APPEND TEST_SOURCES WDL/WDL/win32_utf8.c)
+  else()
+    list(APPEND TEST_SOURCES WDL/WDL/swell/swell-modstub-generic.cpp)
+  endif()
+  add_executable(model_test ${TEST_SOURCES})
+  target_include_directories(model_test PRIVATE reaper-sdk/sdk src WDL/WDL)
+  if(WIN32)
+    target_compile_definitions(model_test PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(model_test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W3 /utf-8 /EHsc> $<$<COMPILE_LANGUAGE:C>:/w>)
+    target_link_libraries(model_test PRIVATE gdi32 user32 comdlg32)
+  else()
+    target_compile_definitions(model_test PRIVATE SWELL_PROVIDED_BY_APP NOMINMAX)
+    target_link_libraries(model_test PRIVATE dl pthread)
+  endif()
+endif()
+
 # `cmake --build build --target install_to_reaper` copies the plugin into UserPlugins
 add_custom_target(install_to_reaper
   COMMAND ${CMAKE_COMMAND} -E make_directory "${INSTALL_DIR}"

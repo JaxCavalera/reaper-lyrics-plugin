@@ -18,6 +18,7 @@ public:
   void RefreshText();      // model -> text widget, caret preserving
   bool Tracking() const { return m_tracking; }
   void SetTracking(bool on);
+  void StartNewBlock();    // put the caret where the next block's first line goes
 
 private:
   struct Layout { int first = 0, last = 0; };          // text-line indices of a block

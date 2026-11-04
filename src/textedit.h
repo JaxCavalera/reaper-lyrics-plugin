@@ -37,6 +37,7 @@ public:
   TEPos Caret() const { return m_caret; }
   void SetCaret(TEPos p, bool keepAnchor = false);
   void SelectAll();
+  void StartParagraphAtEnd();   // caret on a fresh line after a blank separator (or line 0 if empty)
   bool HasSelection() const { return !(m_caret == m_anchor); }
 
   void Paint(HDC dc);

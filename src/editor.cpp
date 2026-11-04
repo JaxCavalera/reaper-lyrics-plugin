@@ -155,6 +155,8 @@ void LyricEditor::RebuildLayout()
     else { if (!open) { cur.first = i; open = true; } cur.last = i; }
   }
   if (open) m_layout.push_back(cur);
+  // the sole block with no lyrics yet still gets its chip on the first line
+  if (m_layout.empty() && g_doc.IsBound() && g_doc.blocks.size() == 1) m_layout.push_back(Layout());
 }
 
 static std::string CanonicalText(const std::vector<std::string>& lines)
@@ -216,6 +218,23 @@ void LyricEditor::OnEditChanged()
     g_doc.ApplyText(CanonicalText(m_text.Lines()), m_tracking ? &m_live : nullptr);
     if (g_doc.blocks.size() != m_layout.size()) RefreshText();
   }
+  UpdateStatus();
+  Invalidate();
+}
+
+// A track with no blocks gets its first block straight away (empty, no placeholder text).
+// Otherwise the caret goes to a fresh paragraph and the block appears with its first typed
+// line - an empty block between others can't be shown, since a blank line separates blocks.
+// While playing with Track on, the play position is stamped so the block starts there.
+void LyricEditor::StartNewBlock()
+{
+  if (!m_hwnd || m_renaming || !g_doc.IsBound()) return;
+  if (g_doc.blocks.empty()) { g_doc.AppendBlock(); RefreshText(); }
+  else if (!(g_doc.blocks.size() == 1 && g_doc.blocks[0].Text().empty())) OnBeforeNewline();
+  m_text.StartParagraphAtEnd();
+  m_text.SetFocus(true);
+  SetFocus(m_hwnd);
+  RebuildLayout();
   UpdateStatus();
   Invalidate();
 }
@@ -352,6 +371,16 @@ void LyricEditor::PaintTextBackground(HDC dc)
       }
     }
   }
+  if (g_doc.IsBound() && m_text.Lines().size() == 1 && m_text.Lines()[0].empty())
+  {
+    // hint only - not part of the text; drawn over the block tint
+    HGDIOBJ of = SelectObject(dc, m_fontUi);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(110, 110, 110));
+    RECT hr = { rc.left + m_text.m_padX + 4, m_text.TextTop(), rc.right - 14, m_text.TextTop() + lh };
+    DrawTextU8(dc, "Type lyrics here. A blank line starts a new block.", &hr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    SelectObject(dc, of);
+  }
 }
 
 void LyricEditor::PaintGutter(HDC dc)
@@ -461,7 +490,7 @@ void LyricEditor::OnButton(int id)
 {
   if (id == BTN_TRACK) SetTracking(!m_tracking);
   else if (id == BTN_PANEL) { LyricsPanel::Get().Toggle(); Invalidate(); }
-  else if (id == BTN_ADD) { if (g_doc.IsBound()) { g_doc.AppendBlock(); RefreshText(); } }
+  else if (id == BTN_ADD) { if (g_doc.IsBound()) StartNewBlock(); }
   else if (id == BTN_TRACKSEL)
   {
     POINT pt = { m_buttons[0].r.left, m_buttons[0].r.bottom };
@@ -489,7 +518,7 @@ void LyricEditor::ShowTrackMenu(POINT pt)
   else if (cmd == MENU_TRACK - 1 && p)
   {
     MediaTrack* t = LyricDoc::CreateLyricTrack(p);
-    if (t) { BindTrack(t); g_doc.AppendBlock(); RefreshText(); }
+    if (t) { BindTrack(t); RefreshText(); StartNewBlock(); }
   }
   Invalidate();
 }

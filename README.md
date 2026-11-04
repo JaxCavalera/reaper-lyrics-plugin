@@ -8,10 +8,15 @@ blocks with a marker for every line.
 
 - **Insert lyric track** in the track-panel right-click menu (next to *Insert track from
   template…*), in the main **Track** menu, and as an action (`Lyrics: Insert lyric track`).
-- Every **block** (paragraph) is an empty item on the lyric track: its name is the block label,
-  its colour is the block colour, and the lyrics are rendered inside it on the timeline.
-  Drag the item to reorder blocks, drag its edges to extend/contract the block — the lines
-  inside scale with it.
+- Every **block** (paragraph) is an empty item on the lyric track, coloured with the block
+  colour and showing just the block label (the lyrics are kept in the item's ext state, so
+  they don't clutter the timeline). Drag the item to reorder blocks, drag its edges to
+  extend/contract the block — the lines inside scale with it. A block never overlaps the
+  next one: stretch or drop an item over its neighbour and it's trimmed back to the
+  neighbour's start.
+- A new lyric track starts with one empty INTRO block — no placeholder text. Clearing all the
+  text keeps that first block (and its timing). **+ Block** puts the caret on a fresh
+  paragraph; the block appears on the timeline as soon as you type its first line.
 - Every **line** gets a project marker (a *sub-marker*) in the block's colour. Drag a marker
   to move that line within its block; the gap to the next marker is the line's duration.
   Dragging the first marker moves the block's start.
@@ -32,6 +37,13 @@ blocks with a marker for every line.
 Everything is stored in the project itself (items, markers, item ext-state), so the project
 file carries the lyrics; only window positions go in `reaper_lyrics.ini` in REAPER's
 resource folder.
+
+How strongly an item's colour fills its background is a REAPER theme setting, not per item:
+the action *Theme Development: Show theme tweak/configuration window* → the media item
+background tint/fill settings
+(`unselitem_tintalpha`, `selitem_tintalpha`, "Media item background fill mode"). Raise them
+if you want the blocks fully coloured. Text typed into a block's item notes in REAPER is
+picked up as that block's lyrics and moved out of the notes.
 
 The whole UI is drawn by the extension itself on the subset of Win32 that REAPER's SWELL
 layer provides, so Windows and Linux run the same code. macOS is not supported.
@@ -100,11 +112,21 @@ cp build-linux/reaper_lyrics.so ~/.config/REAPER/UserPlugins/
 Restart REAPER afterwards. (REAPER for Linux x86_64 only; build on the same architecture
 you run REAPER on.)
 
+### Tests
+
+The document model (text ↔ items/markers sync) has tests that run against a fake REAPER API:
+
+```bash
+cmake -S . -B build -DLYRICS_BUILD_TESTS=ON
+cmake --build build --config Release --target model_test
+build/Release/model_test      # Linux (single-config): build/model_test
+```
+
 ## Use
 
 1. Right-click the empty track-panel area → **Insert lyric track** (or Track menu / action
-   list). A track named *Lyrics* appears with an INTRO block at the edit cursor and the lyric
-   editor opens.
+   list). A track named *Lyrics* appears with an empty INTRO block at the edit cursor and the
+   lyric editor opens, ready to type.
 2. Type. Blank line = new block. Each block becomes an item; each line a marker.
 3. Click a label chip to rename/recolour (double-click to rename inline); drag it to reorder.
 4. Tick **Track**, press play, and hit Enter as you sing to lay lines and blocks down live.
@@ -120,6 +142,7 @@ Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo.
 
 ```
 src/main.cpp        plugin entry, actions, context-menu hook, timer
+tests/model_test.cpp  model tests against a fake REAPER API
 src/model.*         lyric document + two-way sync with items/markers
 src/editor.*        editor window: toolbar, label gutter, text area
 src/textedit.*      self-drawn text widget (selection, clipboard, undo, scrolling)

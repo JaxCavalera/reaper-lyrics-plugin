@@ -2,7 +2,8 @@
 //
 // Timeline representation:
 //   lyric track  = MediaTrack tagged with P_EXT:LYR=1
-//   block        = empty MediaItem on that track (name = label, notes = text, colour = block colour)
+//   block        = empty MediaItem on that track (name = label, colour = block colour,
+//                  lyrics in P_EXT:LYRT so the item itself shows only the label)
 //   line         = project marker (line 0 sits on the item start; markers carry the block colour)
 #pragma once
 #include "api.h"
@@ -28,6 +29,7 @@ struct LyricBlock
   bool customColor = false;
   double start = 0, end = 0;
   std::vector<LyricLine> lines;
+  bool notesPending = false; // read from item notes (typed in REAPER / older project): move into ext state
 
   std::string Text() const;
   double Len() const { return end - start; }
@@ -96,6 +98,7 @@ private:
   void DeleteBlockMarkers(LyricBlock& b);
   void DeleteBlockFromReaper(LyricBlock& b);
   void RelabelAuto();
+  void FixOverlaps();                   // blocks (sorted) never reach past the next block's start
   void NormaliseLines(LyricBlock& b);   // line0 = start, monotonic, inside [start,end]
   void ScaleLines(LyricBlock& b, double oldStart, double oldLen);
   void FinishWrite();

@@ -196,15 +196,51 @@ static std::vector<std::string> NotesToLines(const std::string& notes)
   return out;
 }
 
+// Ext-state values live on one line of the project file: escape \ " CR LF.
+static std::string EscapeExt(const std::string& s)
+{
+  std::string o;
+  for (char c : s)
+  {
+    if (c == '\\') o += "\\\\";
+    else if (c == '\n') o += "\\n";
+    else if (c == '\r') {}
+    else if (c == '"') o += "\\q";
+    else o += c;
+  }
+  return o;
+}
+
+static std::string UnescapeExt(const std::string& s)
+{
+  std::string o;
+  for (size_t i = 0; i < s.size(); i++)
+  {
+    if (s[i] != '\\' || i + 1 >= s.size()) { o += s[i]; continue; }
+    char c = s[++i];
+    o += c == 'n' ? '\n' : c == 'q' ? '"' : c;
+  }
+  return o;
+}
+
 bool LyricDoc::ReadBlockFromItem(MediaItem* item, LyricBlock& b, const std::map<int, MarkerInfo>& markers, std::set<int>* usedIds)
 {
   char buf[65536];
   b.item = item;
   buf[0] = 0; GetSetMediaItemInfo_String(item, "GUID", buf, false); b.guid = buf;
   buf[0] = 0; GetSetMediaItemInfo_String(item, "P_NAME", buf, false); b.label = buf;
+  // Lyrics live in ext state so the item draws only its label. Text found in the item notes
+  // (typed there in REAPER, or a project from an older build) wins and is moved across.
   buf[0] = 0; GetSetMediaItemInfo_String(item, "P_NOTES", buf, false);
-  std::vector<std::string> lines = NotesToLines(buf);
-  if (lines.empty()) lines.push_back("..."); // a block always has at least one line
+  std::string text = buf;
+  b.notesPending = !Trim(text).empty();
+  if (!b.notesPending)
+  {
+    buf[0] = 0; GetSetMediaItemInfo_String(item, "P_EXT:LYRT", buf, false);
+    text = UnescapeExt(buf);
+  }
+  std::vector<std::string> lines = NotesToLines(text);
+  if (lines.empty()) lines.push_back(""); // a block always has at least one line (empty = no lyrics yet)
   b.start = GetMediaItemInfo_Value(item, "D_POSITION");
   b.end = b.start + GetMediaItemInfo_Value(item, "D_LENGTH");
   b.color = (int)GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR");
@@ -297,9 +333,12 @@ void LyricDoc::WriteBlock(LyricBlock& b)
   SetMediaItemInfo_Value(b.item, "I_CUSTOMCOLOR", b.color);
   std::vector<char> name(b.label.begin(), b.label.end()); name.push_back(0);
   GetSetMediaItemInfo_String(b.item, "P_NAME", name.data(), true);
-  std::string text = b.Text();
-  std::vector<char> notes(text.begin(), text.end()); notes.push_back(0);
-  GetSetMediaItemInfo_String(b.item, "P_NOTES", notes.data(), true);
+  std::string text = EscapeExt(b.Text());
+  std::vector<char> ext(text.begin(), text.end()); ext.push_back(0);
+  GetSetMediaItemInfo_String(b.item, "P_EXT:LYRT", ext.data(), true);
+  char none[1] = "";
+  GetSetMediaItemInfo_String(b.item, "P_NOTES", none, true);   // REAPER would draw notes inside the item
+  b.notesPending = false;
   for (size_t i = 0; i < b.lines.size(); i++)
   {
     LyricLine& l = b.lines[i];
@@ -341,6 +380,31 @@ void LyricDoc::RelabelAuto()
   }
 }
 
+// A block never extends past the start of the block after it: an overlapping end is trimmed
+// to the next start (lines scale with it). If that would leave less than a quarter bar, the
+// next block is pushed later instead (and the check carries on down the list).
+void LyricDoc::FixOverlaps()
+{
+  double minLen = BarLen() / 4;
+  for (size_t i = 0; i + 1 < blocks.size(); i++)
+  {
+    LyricBlock& a = blocks[i];
+    LyricBlock& n = blocks[i + 1];
+    if (n.start < a.start + minLen)
+    {
+      double d = a.start + minLen - n.start;
+      n.start += d; n.end += d;
+      for (auto& l : n.lines) l.pos += d;
+    }
+    if (a.end > n.start + kEps)
+    {
+      double os = a.start, ol = a.Len();
+      a.end = n.start;
+      ScaleLines(a, os, ol);
+    }
+  }
+}
+
 bool LyricDoc::BlocksDiffer(const LyricBlock& a, const LyricBlock& b) const
 {
   if (a.label != b.label || a.color != b.color || a.customLabel != b.customLabel || a.customColor != b.customColor) return true;
@@ -374,6 +438,11 @@ bool LyricDoc::SyncFromReaper()
     ReadBlockFromItem(it, b, markers, &usedIds);
     fresh.push_back(b);
   }
+  // Only a sole block can be shown empty in the editor (a blank line separates blocks).
+  // An empty item drawn/pasted in REAPER next to other blocks gets "..." so it shows (and
+  // survives) in the editor. The editor itself never creates such a block.
+  if (fresh.size() > 1)
+    for (auto& b : fresh) if (b.Text().empty() && !b.lines.empty()) b.lines[0].text = "...";
 
   bool wrote = false;
   PreventUIRefresh(1);
@@ -393,7 +462,7 @@ bool LyricDoc::SyncFromReaper()
   for (auto& b : fresh)
   {
     auto it = oldByGuid.find(b.guid);
-    bool needWrite = false;
+    bool needWrite = b.notesPending;
     if (it != oldByGuid.end())
     {
       const LyricBlock& o = *it->second;
@@ -474,6 +543,7 @@ bool LyricDoc::SyncFromReaper()
   // auto labels follow the order
   std::vector<LyricBlock> before = blocks;
   RelabelAuto();
+  FixOverlaps();   // an item dragged/stretched over its neighbour gets trimmed back
   for (size_t i = 0; i < blocks.size(); i++)
     if (BlocksDiffer(blocks[i], before[i])) { WriteBlock(blocks[i]); wrote = true; }
 
@@ -577,6 +647,9 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live)
 {
   if (!ValidateTrack()) return;
   auto paras = ParseParagraphs(utf8);
+  // an empty editor is one empty block, never zero blocks: clearing the text keeps the
+  // first block (and its timing) instead of deleting it
+  if (paras.empty()) paras.push_back({ std::string() });
   std::vector<std::string> oldTexts, newTexts;
   for (auto& b : blocks) oldTexts.push_back(b.Text());
   for (auto& p : paras) newTexts.push_back(JoinLines(p));
@@ -662,6 +735,7 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live)
   }
   blocks = result;
   RelabelAuto();
+  FixOverlaps();
 
   // write what changed
   std::map<std::string, const LyricBlock*> oldByGuid;
@@ -702,6 +776,7 @@ void LyricDoc::MoveBlock(int from, int to)
     t = b.end;
   }
   RelabelAuto();
+  FixOverlaps();
   for (auto& b : blocks) WriteBlock(b);
   PreventUIRefresh(-1);
   Undo_EndBlock2(proj, "Lyrics: move block", -1);
@@ -758,10 +833,11 @@ void LyricDoc::AppendBlock(double atPos)
   nb.end = nb.start + def;
   nb.item = AddMediaItemToTrack(track);
   char g[128] = ""; GetSetMediaItemInfo_String(nb.item, "GUID", g, false); nb.guid = g;
-  LyricLine l; l.text = "..."; l.pos = nb.start; nb.lines.push_back(l);
+  LyricLine l; l.text = ""; l.pos = nb.start; nb.lines.push_back(l);
   blocks.push_back(nb);
   std::stable_sort(blocks.begin(), blocks.end(), [](const LyricBlock& a, const LyricBlock& b) { return a.start < b.start; });
   RelabelAuto();
+  FixOverlaps();
   for (auto& b : blocks) WriteBlock(b);
   PreventUIRefresh(-1);
   Undo_EndBlock2(proj, "Lyrics: add block", -1);

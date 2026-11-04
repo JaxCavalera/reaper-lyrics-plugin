@@ -83,6 +83,17 @@ void TextEdit::SelectAll()
   m_caret = { (int)m_lines.size() - 1, (int)m_lines.back().size() };
 }
 
+void TextEdit::StartParagraphAtEnd()
+{
+  // whitespace-only change: block structure is unaffected until the user types
+  while (m_lines.size() > 1 && Trim(m_lines.back()).empty()) m_lines.pop_back();
+  if (m_lines.size() == 1 && Trim(m_lines[0]).empty()) m_lines[0].clear();
+  else { m_lines.push_back(""); m_lines.push_back(""); }
+  SetCaret({ (int)m_lines.size() - 1, 0 });
+  ClampScroll();
+  EnsureCaretVisible();
+}
+
 void TextEdit::SelRange(TEPos* a, TEPos* b) const
 {
   if (m_caret < m_anchor) { *a = m_caret; *b = m_anchor; } else { *a = m_anchor; *b = m_caret; }

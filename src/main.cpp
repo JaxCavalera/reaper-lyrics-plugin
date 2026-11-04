@@ -20,9 +20,10 @@ static void InsertLyricTrack()
   MediaTrack* t = LyricDoc::CreateLyricTrack(p);
   if (!t) return;
   LyricEditor::Get().BindTrack(t);
-  g_doc.AppendBlock();
+  g_doc.AppendBlock();                 // the first block exists from the start, with no text
   LyricEditor::Get().Show(true);
   LyricEditor::Get().RefreshText();
+  LyricEditor::Get().StartNewBlock();
 }
 
 static bool HookCommand(int cmd, int flag)
