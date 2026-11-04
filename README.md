@@ -95,7 +95,7 @@ layer provides, so Windows and Linux run the same code. macOS is not supported.
 
 Requirements:
 
-- Visual Studio 2022/2026 Build Tools (or full VS) with the *Desktop development with C++*
+- Visual Studio 2019, 2022 or 2026 Build Tools (or full VS) with the *Desktop development with C++*
   workload — gives you `cl.exe`, `rc.exe` and the Windows SDK.
 - CMake 3.20 or newer.
 - Git — the REAPER SDK and WDL are git submodules (`reaper-sdk/`, `WDL/`).
@@ -109,12 +109,15 @@ From a *Developer PowerShell* (or any shell after running `vcvars64.bat`):
 
 ```powershell
 cd reaper-lyrics-plugin
-cmake -S . -B build -G "Visual Studio 18 2026" -A x64      # VS 2022: -G "Visual Studio 17 2022"
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64      # VS 2022: "Visual Studio 17 2022", VS 2019: "Visual Studio 16 2019"
 cmake --build build --config Release
 ```
 
 Or run `.\build.ps1`, which locates the Build Tools with `vswhere`, configures, builds and
-prints where the DLL ended up (`build\Release\reaper_lyrics.dll`).
+prints where the DLL ended up (`build\Release\reaper_lyrics.dll`). It also checks that the
+DLL needs nothing but Windows itself: the C/C++ runtime is built in, so it loads on any 64-bit
+Windows PC without installing a Visual C++ Redistributable — you can copy the DLL to another
+machine.
 
 ### Install
 
@@ -127,8 +130,11 @@ Copy-Item build\Release\reaper_lyrics.dll "$env:APPDATA\REAPER\UserPlugins\"
 `.\build.ps1 -Install` does the copy for you; `cmake --build build --target install_to_reaper`
 is the same thing. REAPER must be closed if it already loaded an older copy (the file is locked).
 
-For a portable REAPER install the folder is `<REAPER dir>\UserPlugins` — whatever
-*Options → Show REAPER resource path* opens, plus `UserPlugins`.
+The folder is REAPER's *resource path* (whatever *Options → Show REAPER resource path* opens)
+plus `UserPlugins`. For a standard install that is `%APPDATA%\REAPER`; for a portable REAPER or
+a custom location pass it in: `.\build.ps1 -Install -ResourcePath D:\REAPER`, or
+`cmake -S . -B build -DREAPER_RESOURCE_PATH="D:/REAPER"` for the CMake target. The install
+warns if that folder has no `reaper.ini`.
 
 ## Build — Linux
 
@@ -141,6 +147,7 @@ git clone --recurse-submodules https://github.com/JaxCavalera/reaper-lyrics-plug
 cd reaper-lyrics-plugin
 ./build.sh              # -> build-linux/reaper_lyrics.so
 ./build.sh --install    # also copies it to ~/.config/REAPER/UserPlugins/
+./build.sh --install /path/to/REAPER   # portable REAPER: its resource path
 ```
 
 Manual equivalent:
@@ -152,8 +159,14 @@ mkdir -p ~/.config/REAPER/UserPlugins
 cp build-linux/reaper_lyrics.so ~/.config/REAPER/UserPlugins/
 ```
 
-Restart REAPER afterwards. (REAPER for Linux x86_64 only; build on the same architecture
-you run REAPER on.)
+Restart REAPER afterwards. The resource path can also be set with `REAPER_RESOURCE_PATH`.
+Build on the same architecture you run REAPER on (x86_64 or aarch64).
+
+`build.sh` also checks the result: the plugin's own code must not need a glibc newer than
+2.17, and it may export nothing but the plugin entry point. The `.so` uses the system's
+libstdc++, so a copy built on one machine runs on any Linux with the same or a newer one; the
+libstdc++ version it needs is printed (built with GCC 11 or newer that is GCC 11's,
+i.e. Ubuntu 22.04 / Debian 12 or newer). Building on the machine that runs REAPER always works.
 
 ### Tests
 
@@ -202,4 +215,5 @@ src/resource.rc     Windows dialog shells      src/resource_swell.cpp  the same 
 reaper-sdk/         REAPER SDK headers (submodule)   WDL/   WDL: SWELL headers, win32_utf8 (submodule)
 ```
 
-Prebuilt binaries for each release are on the GitHub Releases page.
+There are no prebuilt downloads yet: build it as above (a few minutes). The Windows DLL can
+then be copied to any 64-bit Windows PC.

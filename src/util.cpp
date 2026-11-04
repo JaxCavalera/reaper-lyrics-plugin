@@ -224,6 +224,30 @@ bool PrepareBlockPaste(const std::vector<std::string>& lines, int caretLine, std
   return true;
 }
 
+long long ParseInt(const char* p, const char** end)
+{
+  const char* s = p;
+  while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n' || *s == '\v' || *s == '\f') s++;
+  bool neg = false;
+  if (*s == '+' || *s == '-') { neg = *s == '-'; s++; }
+  if (*s < '0' || *s > '9') { if (end) *end = p; return 0; }   // no number: nothing consumed
+  unsigned long long v = 0;
+  while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s - '0'); s++; }
+  if (end) *end = s;
+  return neg ? -(long long)v : (long long)v;
+}
+
+double WheelZoomFactor(int wheelDelta)
+{
+  double n = wheelDelta / 120.0;
+  bool down = n < 0;
+  if (down) n = -n;
+  double f = 1.0;
+  while (n >= 1.0) { f *= 1.25; n -= 1.0; }
+  f *= 1.0 + 0.25 * n;   // part of a notch (touchpads): close to 1.25^n, and monotonic
+  return down ? 1.0 / f : f;
+}
+
 KeyRoute RouteEditorKey(bool wantsKeys, unsigned msg, int vk, bool ctrl)
 {
   if (msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) return KEY_DEFAULT;   // Alt combos: REAPER's business

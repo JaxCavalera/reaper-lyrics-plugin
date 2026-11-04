@@ -1389,7 +1389,7 @@ INT_PTR LyricEditor::Handle(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (pt.x >= m_lane.left && pt.x < m_lane.right && pt.y >= m_lane.top && pt.y < m_lane.bottom)
     {
       // lane: wheel scrolls in time; Ctrl+wheel (or the wheel over the ruler) zooms around the pointer
-      if (CtrlDown() || pt.y < m_lane.top + kRulerH) ZoomAt(pt.x, std::pow(1.25, delta / 120.0));
+      if (CtrlDown() || pt.y < m_lane.top + kRulerH) ZoomAt(pt.x, WheelZoomFactor(delta));
       else { m_viewStart -= (delta / 120.0) * 80.0 / m_pxPerSec; ClampView(); Invalidate(); }
       return 1;
     }

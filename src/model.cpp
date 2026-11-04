@@ -163,8 +163,8 @@ static std::string Micros(double t) { return FormatStr("%lld", (long long)std::l
 static bool ParseMicros(const char*& p, double* out)
 {
   while (*p == ' ') p++;
-  char* end = nullptr;
-  long long v = strtoll(p, &end, 10);
+  const char* end = nullptr;
+  long long v = ParseInt(p, &end);
   if (end == p) return false;
   p = end;
   *out = (double)v / 1e6;
@@ -209,9 +209,7 @@ bool LyricDoc::Deserialize(const std::string& stored, double origin, std::vector
       double s, e;
       if (!ParseMicros(p, &s) || !ParseMicros(p, &e)) continue;
       while (*p == ' ') p++;
-      char* ce = nullptr;
-      b.color = (int)strtol(p, &ce, 10);
-      p = ce;
+      b.color = (int)ParseInt(p, &p);
       while (*p == ' ') p++;
       if (p[0] && p[1]) { b.customLabel = p[0] == 'L'; b.customColor = p[1] == 'C'; p += 2; }
       if (*p && *p != ' ') { b.autoLen = *p == 'A'; p++; }
@@ -567,7 +565,7 @@ bool LyricDoc::MigrateOldItems()
     std::string m = ItemString(it, "P_EXT:LYRM");
     for (const char* p = m.c_str(); *p;)
     {
-      char* e = nullptr; long v = strtol(p, &e, 10);
+      const char* e = nullptr; long long v = ParseInt(p, &e);
       if (e == p) { p++; continue; }
       ids.push_back((int)v); deadMarkers.insert((int)v); p = e;
     }

@@ -8,6 +8,21 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Windows: link the C/C++ runtime statically, so the DLL loads on any PC without a Visual C++
+# Redistributable (a VS 2022/2026 build would otherwise need a recent one).
+# (Linux: the .so uses the system's libstdc++/glibc; build.sh prints the versions it needs.)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Where REAPER keeps its settings and UserPlugins folder (Options > Show REAPER resource path).
+# Defaults to the standard install; set it for a portable REAPER or a custom location:
+#   cmake -S . -B build -DREAPER_RESOURCE_PATH="D:/REAPER"
+if(WIN32)
+  set(_reaper_default "$ENV{APPDATA}/REAPER")
+else()
+  set(_reaper_default "$ENV{HOME}/.config/REAPER")
+endif()
+set(REAPER_RESOURCE_PATH "${_reaper_default}" CACHE PATH "REAPER resource path (contains UserPlugins)")
+
 set(SOURCES
   src/main.cpp
   src/model.cpp
@@ -36,16 +51,18 @@ if(WIN32)
   target_compile_definitions(reaper_lyrics PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
   target_compile_options(reaper_lyrics PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W3 /utf-8 /EHsc> $<$<COMPILE_LANGUAGE:C>:/w>)
   target_link_libraries(reaper_lyrics PRIVATE gdi32 user32 comdlg32)
-  set(INSTALL_DIR "$ENV{APPDATA}/REAPER/UserPlugins")
   set(PLUGIN_FILE "reaper_lyrics.dll")
 else()
   # REAPER provides SWELL at runtime; the modstub fetches the function table
   target_compile_definitions(reaper_lyrics PRIVATE SWELL_PROVIDED_BY_APP NOMINMAX)
   target_compile_options(reaper_lyrics PRIVATE -fPIC -fvisibility=hidden -Wall -Wno-unused-parameter)
   target_link_libraries(reaper_lyrics PRIVATE dl pthread)
-  set(INSTALL_DIR "$ENV{HOME}/.config/REAPER/UserPlugins")
+  # export only what REAPER calls, not the C++ library code the headers instantiate
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/exports.map" "{ global: ReaperPluginEntry; SWELL_dllMain; local: *; };\n")
+  target_link_options(reaper_lyrics PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/exports.map")
   set(PLUGIN_FILE "reaper_lyrics.so")
 endif()
+set(INSTALL_DIR "${REAPER_RESOURCE_PATH}/UserPlugins")
 
 # Model tests against a fake REAPER API:
 #   cmake -S . -B build -DLYRICS_BUILD_TESTS=ON && cmake --build build --config Release --target model_test

@@ -57,6 +57,11 @@ bool PrepareBlockPaste(const std::vector<std::string>& lines, int caretLine, std
 // other block whose middle is below the ghost; == dragged means it stays put.
 int DragInsertIndex(const std::vector<std::pair<int, int>>& spans, int dragged, int ghostMid);
 
+// Portable replacements for libc calls that would tie the Linux build to a recent glibc
+// (strtol/strtoll become __isoc23_* on glibc 2.38, pow is versioned 2.29).
+long long ParseInt(const char* p, const char** end);   // like strtoll(p, end, 10)
+double WheelZoomFactor(int wheelDelta);                // 1.25 per notch (120), smooth in between
+
 // Where a key pressed in the sequencer window goes. wantsKeys: the lyric text was clicked
 // into, or a label is being renamed.
 enum KeyRoute { KEY_DEFAULT, KEY_TO_REAPER, KEY_TO_EDITOR };

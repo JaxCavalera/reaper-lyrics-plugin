@@ -676,6 +676,14 @@ int main()
     CHECK(B[0].Text() == "c" && B[0].label == "CHORUS" && B[2].Text() == "d" && B[2].label == "OUTRO");
     CHECK(NoOverlaps() && ItemFits());
 
+    // portable replacements for strtoll / pow
+    { const char* s = " -12x"; const char* e = nullptr; CHECK(ParseInt(s, &e) == -12 && *e == 'x'); }
+    { const char* s = "abc"; const char* e = nullptr; CHECK(ParseInt(s, &e) == 0 && e == s); }
+    { const char* s = "1234567890123"; const char* e = nullptr; CHECK(ParseInt(s, &e) == 1234567890123LL && *e == 0); }
+    { const char* s = "+16777215 L"; const char* e = nullptr; CHECK(ParseInt(s, &e) == 16777215 && *e == ' '); }
+    CHECK(Near(WheelZoomFactor(120), 1.25) && Near(WheelZoomFactor(240), 1.5625) && Near(WheelZoomFactor(-120), 0.8));
+    CHECK(WheelZoomFactor(60) > 1.0 && WheelZoomFactor(60) < 1.25 && Near(WheelZoomFactor(0), 1.0));
+
     // keys in the sequencer window: REAPER's unless the text was clicked into / a label is renamed
     CHECK(RouteEditorKey(false, WM_KEYDOWN, VK_SPACE, false) == KEY_TO_REAPER);   // space = play
     CHECK(RouteEditorKey(false, WM_KEYUP, VK_SPACE, false) == KEY_TO_REAPER);
