@@ -204,15 +204,8 @@ void LyricEditor::OpenForTrack(MediaTrack* t)
 void LyricEditor::RebuildLayout()
 {
   m_layout.clear();
-  const std::vector<std::string> lines = m_text.LogicalLines();   // soft empty lines stay in their block
-  bool open = false; Layout cur;
-  for (int i = 0; i < (int)lines.size(); i++)
-  {
-    bool blank = Trim(lines[i]).empty();
-    if (blank) { if (open) { m_layout.push_back(cur); open = false; } }
-    else { if (!open) { cur.first = i; open = true; } cur.last = i; }
-  }
-  if (open) m_layout.push_back(cur);
+  // same paragraphs as the document: soft empty lines stay in their block, never make one
+  for (auto& p : ParagraphSpans(m_text.LogicalLines())) { Layout L; L.first = p.first; L.last = p.second; m_layout.push_back(L); }
   // the sole block with no lyrics yet still gets its chip on the first line
   if (m_layout.empty() && g_doc.IsBound() && g_doc.blocks.size() == 1) m_layout.push_back(Layout());
 }
@@ -299,6 +292,31 @@ void LyricEditor::ShowTextMenu(int x, int y)
   else if (cmd == MENU_TEXT_BREAK_REMOVE) m_text.SetLinesSoft(r0, r1, true);     // hard -> soft
   SetFocus(m_hwnd);
   Invalidate();
+}
+
+// Lyric line index within a block <-> text row: soft empty lines are rows but not lyric lines.
+int LyricEditor::TextRow(int block, int lyricLine) const
+{
+  if (block < 0 || block >= (int)m_layout.size()) return 0;
+  const Layout& L = m_layout[block];
+  int n = 0;
+  for (int r = L.first; r <= L.last; r++)
+  {
+    if (m_text.IsSoftBlank(r)) continue;
+    if (n == lyricLine) return r;
+    n++;
+  }
+  return L.last;
+}
+
+int LyricEditor::LyricLineAt(int block, int row) const
+{
+  if (block < 0 || block >= (int)m_layout.size()) return -1;
+  const Layout& L = m_layout[block];
+  if (row < L.first || row > L.last || m_text.IsSoftBlank(row)) return -1;
+  int n = 0;
+  for (int r = L.first; r < row; r++) if (!m_text.IsSoftBlank(r)) n++;
+  return n;
 }
 
 void LyricEditor::CaretInfo(int* block, int* line, int* col)
@@ -512,7 +530,7 @@ void LyricEditor::PaintTextBackground(HDC dc)
     if (r.bottom > r.top) FillRectColor(dc, r, Blend(kBg, c, cur ? 0.16 : 0.07));
     if (cur && m_curLine >= 0)
     {
-      int line = L.first + m_curLine;
+      int line = TextRow((int)i, m_curLine);
       if (line >= first && line < last)
       {
         RECT lr = { rc.left, m_text.LineY(line), rc.right - 10, m_text.LineY(line) + lh };
@@ -594,7 +612,7 @@ void LyricEditor::PaintGutter(HDC dc)
     }
     if (cur && m_curLine >= 0)
     {
-      int line = L.first + m_curLine;
+      int line = TextRow((int)i, m_curLine);
       if (line >= first && line < lastVis)
       {
         int ly = m_text.LineY(line);
@@ -832,6 +850,7 @@ void LyricEditor::PaintLane(HDC dc)
 
   int cb = -1, cl = 0, cc = 0;
   CaretInfo(&cb, &cl, &cc);
+  int caretLyric = cb >= 0 && cb < (int)m_layout.size() ? LyricLineAt(cb, m_layout[cb].first + cl) : -1;
   const auto& blocks = g_doc.blocks;
   if (blocks.empty())
   {
@@ -866,7 +885,7 @@ void LyricEditor::PaintLane(HDC dc)
       RECT lr = { std::max(lx0, (int)r.left), ly0, std::min(lx1 - 1, (int)r.right), ly1 };
       if (lr.right <= lr.left) continue;
       FillRectColor(dc, lr, lc);
-      if ((int)i == cb && (int)li == cl) { RECT u = { lr.left, ly1 - 3, lr.right, ly1 }; FillRectColor(dc, u, RGB(255, 255, 255)); }
+      if ((int)i == cb && (int)li == caretLyric) { RECT u = { lr.left, ly1 - 3, lr.right, ly1 }; FillRectColor(dc, u, RGB(255, 255, 255)); }
       if (li > 0 && lx0 >= r.left) { RECT hnd = { lx0, ly0, lx0 + 2, ly1 }; FillRectColor(dc, hnd, Blend(c, RGB(255, 255, 255), 0.7)); }
       SetTextColor(dc, IsLightColor(lc) ? RGB(20, 20, 20) : RGB(245, 245, 245));
       RECT ttr = { lr.left + 5, ly0 + 3, lr.right - 3, ly1 - 4 };
@@ -956,7 +975,7 @@ int LyricEditor::ReorderTarget(int block, double t) const
 void LyricEditor::FocusBlockInText(int block, int line)
 {
   if (block < 0 || block >= (int)m_layout.size()) return;
-  int ln = std::min(m_layout[block].first + std::max(0, line), m_layout[block].last);
+  int ln = TextRow(block, std::max(0, line));   // lyric line -> text row (soft empty lines skipped)
   m_text.SetCaret({ ln, 0 });
   m_text.EnsureCaretVisible();   // shows it; keyboard focus stays where it is
   Invalidate();

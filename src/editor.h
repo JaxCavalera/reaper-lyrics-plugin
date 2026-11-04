@@ -37,7 +37,9 @@ private:
   void RebuildLayout();
   void OnEditChanged();
   void OnBeforeNewline();
-  void CaretInfo(int* block, int* line, int* col);
+  void CaretInfo(int* block, int* line, int* col);   // line: text row offset within the block
+  int TextRow(int block, int lyricLine) const;        // lyric line -> text row (skips soft empty lines)
+  int LyricLineAt(int block, int row) const;          // text row -> lyric line, -1 on a soft empty line
   void UpdateStatus();
   void AutoScroll();
   void Paint(HDC dc);

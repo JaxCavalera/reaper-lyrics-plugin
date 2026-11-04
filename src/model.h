@@ -17,6 +17,7 @@ struct LyricLine
 {
   std::string text;
   double pos = 0;            // absolute project time
+  int softBefore = 0;        // soft empty lines shown above it in the text (Shift+Enter); not timed
 };
 
 struct LyricBlock
@@ -27,11 +28,16 @@ struct LyricBlock
   bool customColor = false;
   bool autoLen = false;      // still default-sized: 2 bars per line, grows/shrinks as lines are typed
   double start = 0, end = 0; // absolute project time
-  std::vector<LyricLine> lines;
+  std::vector<LyricLine> lines;   // the lyric lines (timed); soft empty lines are only counts
+  int softAfter = 0;              // soft empty lines after the last lyric line
 
-  std::string Text() const;
+  std::string Text() const;       // as in the editor, soft empty lines included (SoftBlank())
+  std::string LyricText() const;  // the lyric lines only
   double Len() const { return end - start; }
 };
+
+// A paragraph of editor text -> its lyric lines plus where the soft empty lines go.
+void SplitSoftLines(const std::vector<std::string>& para, std::vector<std::string>* lyric, std::vector<int>* softBefore, int* softAfter);
 
 // A block copied in the editor, pasted on a clean line (outside every block): the pasted
 // paragraph becomes a block with the same label and colour; a whole copied block also keeps

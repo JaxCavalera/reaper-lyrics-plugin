@@ -63,8 +63,9 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     for label presets, colour, delete;
   - below the lane, the **lyric text**: one blank line starts a new block. Edits are diffed
     against the existing blocks so timings survive typing. **Shift+Enter** makes a *soft*
-    line instead: left empty, it is a gap inside the block (drawn with a dashed mark in the
-    block colour) rather than a block break, and it gets its own slot in the block's timing.
+    line instead: left empty, it is spacing inside the block (drawn with a dashed mark in the
+    block colour) rather than a block break. It is only there to make the lyrics easier to
+    read: it is not a line in the sequencer lane, the lyrics panel or the block's timing.
     Right-click an empty soft line → **Insert breakpoint** to split the block there;
     right-click the empty line between two blocks → **Remove breakpoint** to join them. Drag a label chip in the gutter
     up or down to move a whole block: a see-through copy of the label follows the mouse and

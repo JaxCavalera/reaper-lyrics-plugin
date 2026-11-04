@@ -31,8 +31,11 @@ COLORREF Blend(COLORREF a, COLORREF b, double t);
 // elements, in increasing order, maximising the number of matches.
 std::vector<std::pair<int, int>> LcsMatch(const std::vector<std::string>& a, const std::vector<std::string>& b);
 
-// ---- lyric text: paragraphs (blocks) are runs of non-blank lines
+// ---- lyric text: paragraphs (blocks) are runs of non-blank lines with at least one lyric line
+// (soft empty lines, SoftBlank(), belong to the block they sit in but never make one alone)
 
+bool IsLyricLine(const std::string& l);   // not blank and not a soft empty line
+std::vector<std::pair<int, int>> ParagraphSpans(const std::vector<std::string>& lines);   // first..last
 // editor lines -> text with exactly one blank line between paragraphs
 std::string CanonicalText(const std::vector<std::string>& lines);
 // paragraphs that start before line upTo

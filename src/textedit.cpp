@@ -308,7 +308,7 @@ void TextEdit::InsertCodepoint(unsigned cp)
 void TextEdit::Newline(bool soft)
 {
   if (m_readOnly || m_single) return;
-  if (onBeforeNewline) onBeforeNewline();
+  if (onBeforeNewline && !soft) onBeforeNewline();   // soft lines are text-only: nothing to time
   InsertText("\n", soft);
 }
 

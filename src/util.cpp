@@ -157,26 +157,37 @@ std::vector<std::pair<int, int>> LcsMatch(const std::vector<std::string>& a, con
 
 // ---------------------------------------------------------------- lyric text
 
+bool IsLyricLine(const std::string& l) { return l != SoftBlank() && !Trim(l).empty(); }
+
+std::vector<std::pair<int, int>> ParagraphSpans(const std::vector<std::string>& lines)
+{
+  std::vector<std::pair<int, int>> out;
+  int n = (int)lines.size();
+  for (int i = 0; i < n;)
+  {
+    if (Trim(lines[i]).empty()) { i++; continue; }
+    int a = i; bool lyric = false;
+    while (i < n && !Trim(lines[i]).empty()) { lyric = lyric || IsLyricLine(lines[i]); i++; }
+    if (lyric) out.push_back({ a, i - 1 });   // only soft lines: not a block
+  }
+  return out;
+}
+
 std::string CanonicalText(const std::vector<std::string>& lines)
 {
-  std::string out; bool open = false;
-  for (auto& l : lines)
+  std::string out;
+  for (auto& p : ParagraphSpans(lines))
   {
-    if (Trim(l).empty()) { open = false; continue; }
-    if (!out.empty()) out += open ? "\n" : "\n\n";
-    out += l; open = true;
+    if (!out.empty()) out += "\n\n";
+    for (int i = p.first; i <= p.second; i++) { if (i > p.first) out += "\n"; out += lines[i]; }
   }
   return out;
 }
 
 int CountParagraphs(const std::vector<std::string>& lines, int upTo)
 {
-  int n = 0; bool open = false;
-  for (int i = 0; i < upTo && i < (int)lines.size(); i++)
-  {
-    if (Trim(lines[i]).empty()) open = false;
-    else if (!open) { n++; open = true; }
-  }
+  int n = 0;
+  for (auto& p : ParagraphSpans(lines)) if (p.first < upTo) n++;
   return n;
 }
 

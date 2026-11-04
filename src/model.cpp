@@ -13,9 +13,33 @@ static const char* kDocKey = "P_EXT:LYRD";
 
 std::string LyricBlock::Text() const
 {
+  std::vector<std::string> rows;
+  for (auto& l : lines)
+  {
+    for (int k = 0; k < l.softBefore; k++) rows.push_back(SoftBlank());
+    rows.push_back(l.text);
+  }
+  for (int k = 0; k < softAfter; k++) rows.push_back(SoftBlank());
+  return JoinLines(rows);
+}
+
+std::string LyricBlock::LyricText() const
+{
   std::string s;
   for (size_t i = 0; i < lines.size(); i++) { if (i) s += "\n"; s += lines[i].text; }
   return s;
+}
+
+void SplitSoftLines(const std::vector<std::string>& para, std::vector<std::string>* lyric, std::vector<int>* softBefore, int* softAfter)
+{
+  lyric->clear(); softBefore->clear();
+  int pending = 0;
+  for (auto& l : para)
+  {
+    if (l == SoftBlank()) { pending++; continue; }
+    lyric->push_back(l); softBefore->push_back(pending); pending = 0;
+  }
+  *softAfter = pending;
 }
 
 // ------------------------------------------------------------------ labels / colours
@@ -188,7 +212,12 @@ std::string LyricDoc::Serialize(const std::vector<LyricBlock>& blocks, double or
     s += b.customColor ? 'C' : '-';
     s += b.autoLen ? 'A' : '-';
     s += " " + OneLine(b.label) + "\n";
-    for (auto& l : b.lines) s += "L " + Micros(l.pos - origin) + " " + OneLine(l.text) + "\n";
+    for (auto& l : b.lines)
+    {
+      if (l.softBefore > 0) s += FormatStr("S %d\n", l.softBefore);   // soft empty lines (text only)
+      s += "L " + Micros(l.pos - origin) + " " + OneLine(l.text) + "\n";
+    }
+    if (b.softAfter > 0) s += FormatStr("S %d\n", b.softAfter);
   }
   return EscapeExt(s);
 }
@@ -198,11 +227,18 @@ bool LyricDoc::Deserialize(const std::string& stored, double origin, std::vector
   out.clear();
   std::vector<std::string> rows = SplitLines(UnescapeExt(stored));
   if (rows.empty() || rows[0] != "LYRD1") return false;
+  int pendingSoft = 0;   // "S n": soft empty lines before the next lyric line (or ending the block)
   for (size_t r = 1; r < rows.size(); r++)
   {
     const std::string& row = rows[r];
     if (row.size() < 2 || row[1] != ' ') continue;
     const char* p = row.c_str() + 2;
+    if (row[0] == 'S')
+    {
+      if (!out.empty()) pendingSoft += std::max(0, (int)ParseInt(p, nullptr));
+      continue;
+    }
+    if (row[0] == 'B' && !out.empty()) { out.back().softAfter += pendingSoft; pendingSoft = 0; }
     if (row[0] == 'B')
     {
       LyricBlock b;
@@ -226,11 +262,21 @@ bool LyricDoc::Deserialize(const std::string& stored, double origin, std::vector
       if (*p == ' ') p++;
       l.text = p;
       l.pos = origin + t;
+      l.softBefore = pendingSoft; pendingSoft = 0;
       out.back().lines.push_back(l);
     }
   }
+  if (!out.empty()) out.back().softAfter += pendingSoft;
   for (auto& b : out)
   {
+    // a build that kept soft empty lines as timed lines: fold them back into counts
+    std::vector<LyricLine> kept; int soft = 0;
+    for (auto& l : b.lines)
+    {
+      if (l.text == SoftBlank()) { soft += 1 + l.softBefore; continue; }
+      l.softBefore += soft; soft = 0; kept.push_back(l);
+    }
+    if (kept.size() != b.lines.size()) { b.softAfter = kept.empty() ? 0 : b.softAfter + soft; b.lines = kept; }
     if (b.lines.empty()) { LyricLine l; l.pos = b.start; b.lines.push_back(l); }
     if (b.end <= b.start) b.end = b.start + 1;
   }
@@ -718,13 +764,9 @@ std::string LyricDoc::ToText() const
 static std::vector<std::vector<std::string>> ParseParagraphs(const std::string& text)
 {
   std::vector<std::vector<std::string>> out;
-  std::vector<std::string> cur;
-  for (auto& raw : SplitLines(text))
-  {
-    if (Trim(raw).empty()) { if (!cur.empty()) { out.push_back(cur); cur.clear(); } }
-    else cur.push_back(raw);
-  }
-  if (!cur.empty()) out.push_back(cur);
+  std::vector<std::string> rows = SplitLines(text);
+  for (auto& p : ParagraphSpans(rows))   // a run of only soft empty lines is not a block
+    out.push_back(std::vector<std::string>(rows.begin() + p.first, rows.begin() + p.second + 1));
   return out;
 }
 
@@ -803,7 +845,8 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live, const std::
 
   std::vector<LyricBlock> old = blocks;
 
-  struct Slot { LyricBlock blk; bool isNew = false; bool exists = false; std::vector<std::string> lines; const PastedBlock* paste = nullptr; };
+  // lines: the paragraph's lyric lines (timed); soft/softAfter: where its soft empty lines go
+  struct Slot { LyricBlock blk; bool isNew = false; bool exists = false; std::vector<std::string> lines; std::vector<int> soft; int softAfter = 0; const PastedBlock* paste = nullptr; };
   std::vector<Slot> slots(paras.size());
   // pasted paragraphs are always new blocks: keep them out of the matching, so a pasted copy
   // never takes over the timing of the block it was copied from
@@ -827,7 +870,7 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live, const std::
     while (ni < ne) { slots[keep[ni]].isNew = true; ni++; }
     oi = oe + 1; ni = ne + 1;
   }
-  for (size_t i = 0; i < slots.size(); i++) slots[i].lines = paras[i];
+  for (size_t i = 0; i < slots.size(); i++) SplitSoftLines(paras[i], &slots[i].lines, &slots[i].soft, &slots[i].softAfter);
 
   bool structural = deleted > 0;
   for (auto& s : slots) if (s.isNew) structural = true;
@@ -904,9 +947,16 @@ void LyricDoc::ApplyText(const std::string& utf8, LiveContext* live, const std::
     else
     {
       LyricBlock b = s.blk;
-      if (b.Text() != JoinLines(s.lines)) DiffLines(b, s.lines, live, next);
+      if (b.LyricText() != JoinLines(s.lines)) DiffLines(b, s.lines, live, next);
       result.push_back(b);
     }
+  }
+  // soft empty lines: text-only spacing, attached to the lyric lines (never timed)
+  for (size_t i = 0; i < result.size() && i < slots.size(); i++)
+  {
+    auto& L = result[i].lines;
+    for (size_t k = 0; k < L.size(); k++) L[k].softBefore = k < slots[i].soft.size() ? slots[i].soft[k] : 0;
+    result[i].softAfter = slots[i].softAfter;
   }
   blocks = result;
   // default-sized blocks follow their line count; the blocks after one that grew or shrank

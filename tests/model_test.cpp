@@ -629,7 +629,11 @@ int main()
     te.TypeText("one"); te.Newline(true); te.Newline(true); te.TypeText("two");
     CHECK(te.Lines().size() == 3 && te.Lines()[1].empty() && te.IsSoftBlank(1));
     apply();
-    CHECK(B.size() == 1 && B[0].lines.size() == 3 && B[0].lines[2].text == "two");
+    // ...and the soft line is text-only: two lyric lines in the sequencer, the gap is a count
+    CHECK(B.size() == 1 && B[0].lines.size() == 2 && B[0].lines[1].text == "two");
+    CHECK(B[0].lines[0].softBefore == 0 && B[0].lines[1].softBefore == 1 && B[0].softAfter == 0);
+    CHECK(B[0].LyricText() == "one\ntwo" && B[0].Text() == std::string("one\n") + SoftBlank() + "\ntwo");
+    CHECK(Near(B[0].Len(), 2 * g_doc.LineSlot()));                         // default size: 2 lines, not 3
     // "three" after Return Return: an empty hard line -> a new block
     te.Newline(); te.Newline(); te.TypeText("three");
     CHECK(!te.IsSoft(3) && te.Lines()[3].empty() && te.Lines()[4] == "three");
@@ -644,7 +648,8 @@ int main()
     te2.SetText(g_doc.ToText());
     CHECK(te2.IsSoftBlank(1) && te2.Lines()[1].empty() && te2.LogicalLines() == te.LogicalLines());
     g_doc.Bind(kProj, t7);
-    CHECK(B.size() == 3 && B[0].lines.size() == 3);                         // and through storage
+    CHECK(B.size() == 3 && B[0].lines.size() == 2 && B[0].lines[1].softBefore == 1);   // and through storage
+    CHECK(g_doc.ToText() == CanonicalText(te.LogicalLines()));
     // Insert breakpoint on the soft empty line: hard -> block 0 splits in two
     te.SetLinesSoft(1, 1, false);
     apply();
@@ -655,7 +660,29 @@ int main()
     CHECK(r0 == 1 && r1 == 1);
     te.SetLinesSoft(r0, r1, true);
     apply();
-    CHECK(B.size() == 3 && B[0].lines.size() == 3);
+    CHECK(B.size() == 3 && B[0].lines.size() == 2 && B[0].lines[1].softBefore == 1);
+    // soft lines at the start / end of a block, and several in a row
+    {
+      TextEdit t(false);
+      t.SetText(std::string(SoftBlank()) + "\na\n" + SoftBlank() + "\n" + SoftBlank() + "\nb\n" + SoftBlank());
+      std::vector<std::string> ly; std::vector<int> sb; int sa = 0;
+      SplitSoftLines(t.LogicalLines(), &ly, &sb, &sa);
+      CHECK(ly.size() == 2 && sb[0] == 1 && sb[1] == 2 && sa == 1);
+      // a run of only soft empty lines is not a block
+      CHECK(ParagraphSpans({ "a", "", SoftBlank(), "", "b" }).size() == 2);
+      CHECK(CanonicalText({ "a", "", SoftBlank(), "", "b" }) == "a\n\nb");
+    }
+    // a document from the previous build (soft lines stored as timed lines) is folded back
+    {
+      std::vector<LyricBlock> got;
+      std::string old = std::string("LYRD1\nB 0 8000000 0 --- VERSE\nL 0 one\nL 2000000 ") + SoftBlank() + "\nL 4000000 two\nL 6000000 " + SoftBlank() + "\n";
+      CHECK(LyricDoc::Deserialize(old, 100.0, got));
+      CHECK(got.size() == 1 && got[0].lines.size() == 2 && got[0].lines[1].text == "two" && got[0].lines[1].softBefore == 1 && got[0].softAfter == 1);
+      // and the new format round-trips
+      std::vector<LyricBlock> again;
+      CHECK(LyricDoc::Deserialize(LyricDoc::Serialize(got, 100.0), 100.0, again));
+      CHECK(again.size() == 1 && again[0].Text() == got[0].Text() && again[0].lines.size() == 2);
+    }
     // pasting text with a soft empty line keeps it soft
     TextEdit te3(false);
     te3.TypeText(std::string("x\n") + SoftBlank() + "\ny");
