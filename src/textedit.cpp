@@ -4,6 +4,15 @@
 
 static const int kScrollW = 10;
 
+static unsigned long DoubleClickMs()
+{
+#ifdef _WIN32
+  return GetDoubleClickTime();
+#else
+  return 400;
+#endif
+}
+
 TextEdit::TextEdit(bool singleLine) : m_single(singleLine)
 {
   m_lines.push_back("");
@@ -30,12 +39,63 @@ void TextEdit::SetText(const std::string& utf8)
   m_lines = SplitLines(utf8);
   if (m_single && m_lines.size() > 1) m_lines.resize(1);
   if (m_lines.empty()) m_lines.push_back("");
+  m_soft.assign(m_lines.size(), 0);
+  for (size_t i = 0; i < m_lines.size(); i++)
+    if (m_lines[i] == SoftBlank()) { m_lines[i].clear(); m_soft[i] = 1; }
   m_caret = m_anchor = TEPos();
   m_undo.clear(); m_redo.clear(); m_lastUndoKind = -1;
   ClampScroll();
 }
 
-std::string TextEdit::GetText() const { return JoinLines(m_lines); }
+std::string TextEdit::GetText() const { return JoinLines(LogicalLines()); }
+
+std::vector<std::string> TextEdit::LogicalLines() const
+{
+  std::vector<std::string> out = m_lines;
+  for (size_t i = 0; i < out.size(); i++) if (IsSoftBlank((int)i)) out[i] = SoftBlank();
+  return out;
+}
+
+bool TextEdit::IsSoftBlank(int line) const
+{
+  return IsSoft(line) && Trim(m_lines[line]).empty();
+}
+
+void TextEdit::FixSoft()
+{
+  if (m_soft.size() != m_lines.size()) m_soft.resize(m_lines.size(), 0);
+}
+
+void TextEdit::SetLinesSoft(int first, int last, bool soft)
+{
+  if (m_readOnly) return;
+  FixSoft();
+  first = std::max(0, first); last = std::min((int)m_lines.size() - 1, last);
+  if (first > last) return;
+  PushUndo(3);
+  for (int i = first; i <= last; i++) m_soft[i] = soft ? 1 : 0;
+  Changed();
+}
+
+void TextEdit::SelectLine(int line)
+{
+  if (line < 0 || line >= (int)m_lines.size()) return;
+  m_anchor = { line, 0 };
+  m_caret = { line, (int)m_lines[line].size() };
+  m_preferredX = -1;
+}
+
+void TextEdit::SelectWordAt(TEPos p)
+{
+  if (p.line < 0 || p.line >= (int)m_lines.size()) return;
+  const std::string& L = m_lines[p.line];
+  int a = std::min(p.col, (int)L.size()), b = a;
+  auto isWord = [](unsigned char c) { return c > ' ' && c != ',' && c != '.' && c != ';'; };
+  while (a > 0 && isWord(L[a - 1])) a--;
+  while (b < (int)L.size() && isWord(L[b])) b++;
+  m_anchor = { p.line, a }; m_caret = { p.line, b };
+  m_preferredX = -1;
+}
 
 int TextEdit::VisibleLines() const
 {
@@ -86,9 +146,10 @@ void TextEdit::SelectAll()
 void TextEdit::StartParagraphAtEnd()
 {
   // whitespace-only change: block structure is unaffected until the user types
-  while (m_lines.size() > 1 && Trim(m_lines.back()).empty()) m_lines.pop_back();
-  if (m_lines.size() == 1 && Trim(m_lines[0]).empty()) m_lines[0].clear();
-  else { m_lines.push_back(""); m_lines.push_back(""); }
+  FixSoft();
+  while (m_lines.size() > 1 && Trim(m_lines.back()).empty() && !m_soft.back()) { m_lines.pop_back(); m_soft.pop_back(); }
+  if (m_lines.size() == 1 && Trim(m_lines[0]).empty() && !m_soft[0]) m_lines[0].clear();
+  else { m_lines.push_back(""); m_lines.push_back(""); m_soft.push_back(0); m_soft.push_back(0); }
   SetCaret({ (int)m_lines.size() - 1, 0 });
   ClampScroll();
   EnsureCaretVisible();
@@ -104,9 +165,11 @@ std::string TextEdit::SelectedText() const
   TEPos a, b; SelRange(&a, &b);
   if (a == b) return "";
   if (a.line == b.line) return m_lines[a.line].substr(a.col, b.col - a.col);
-  std::string s = m_lines[a.line].substr(a.col);
-  for (int l = a.line + 1; l < b.line; l++) { s += "\n"; s += m_lines[l]; }
-  s += "\n"; s += m_lines[b.line].substr(0, b.col);
+  // soft empty lines travel as SoftBlank(), so pasting them back keeps them soft
+  auto line = [&](int l) { return IsSoftBlank(l) ? std::string(SoftBlank()) : m_lines[l]; };
+  std::string s = IsSoftBlank(a.line) ? line(a.line) : m_lines[a.line].substr(a.col);
+  for (int l = a.line + 1; l < b.line; l++) { s += "\n"; s += line(l); }
+  s += "\n"; s += IsSoftBlank(b.line) ? line(b.line) : m_lines[b.line].substr(0, b.col);
   return s;
 }
 
@@ -116,7 +179,8 @@ void TextEdit::PushUndo(int kind)
 {
   unsigned long now = GetTickCount();
   if (kind == m_lastUndoKind && kind == 1 && now - m_lastEditTick < 700 && !m_undo.empty()) { m_lastEditTick = now; return; }
-  m_undo.push_back({ m_lines, m_caret, m_anchor });
+  FixSoft();
+  m_undo.push_back({ m_lines, m_soft, m_caret, m_anchor });
   if (m_undo.size() > 300) m_undo.erase(m_undo.begin());
   m_redo.clear();
   m_lastUndoKind = kind; m_lastEditTick = now;
@@ -125,9 +189,9 @@ void TextEdit::PushUndo(int kind)
 void TextEdit::Undo()
 {
   if (m_undo.empty()) return;
-  m_redo.push_back({ m_lines, m_caret, m_anchor });
+  m_redo.push_back({ m_lines, m_soft, m_caret, m_anchor });
   Snap s = m_undo.back(); m_undo.pop_back();
-  m_lines = s.lines; m_caret = s.caret; m_anchor = s.anchor;
+  m_lines = s.lines; m_soft = s.soft; m_caret = s.caret; m_anchor = s.anchor;
   m_lastUndoKind = -1;
   Changed();
 }
@@ -135,9 +199,9 @@ void TextEdit::Undo()
 void TextEdit::Redo()
 {
   if (m_redo.empty()) return;
-  m_undo.push_back({ m_lines, m_caret, m_anchor });
+  m_undo.push_back({ m_lines, m_soft, m_caret, m_anchor });
   Snap s = m_redo.back(); m_redo.pop_back();
-  m_lines = s.lines; m_caret = s.caret; m_anchor = s.anchor;
+  m_lines = s.lines; m_soft = s.soft; m_caret = s.caret; m_anchor = s.anchor;
   m_lastUndoKind = -1;
   Changed();
 }
@@ -155,13 +219,17 @@ void TextEdit::DeleteSelection()
 {
   TEPos a, b; SelRange(&a, &b);
   if (a == b) return;
+  FixSoft();
   std::string merged = m_lines[a.line].substr(0, a.col) + m_lines[b.line].substr(b.col);
   m_lines.erase(m_lines.begin() + a.line, m_lines.begin() + b.line + 1);
   m_lines.insert(m_lines.begin() + a.line, merged);
+  m_soft.erase(m_soft.begin() + a.line + 1, m_soft.begin() + b.line + 1);   // merged line keeps a's
   m_caret = m_anchor = a;
 }
 
-void TextEdit::InsertText(const std::string& raw)
+// softNewLines: the lines this insert creates are soft (Shift+Enter). Pasted lines that are
+// exactly SoftBlank() become soft empty lines.
+void TextEdit::InsertText(const std::string& raw, bool softNewLines)
 {
   if (m_readOnly) return;
   std::string s;
@@ -169,11 +237,23 @@ void TextEdit::InsertText(const std::string& raw)
   if (m_single) { std::string t; for (char c : s) if (c != '\n') t += c; s = t; }
   PushUndo(s.size() == 1 ? 1 : 2);
   DeleteSelection();
+  FixSoft();
   std::vector<std::string> parts = SplitLines(s);
-  std::string tail = m_lines[m_caret.line].substr(m_caret.col);
-  m_lines[m_caret.line] = m_lines[m_caret.line].substr(0, m_caret.col) + parts[0];
-  for (size_t i = 1; i < parts.size(); i++) m_lines.insert(m_lines.begin() + m_caret.line + i, parts[i]);
-  int lastLine = m_caret.line + (int)parts.size() - 1;
+  std::vector<char> partSoft(parts.size(), softNewLines ? 1 : 0);
+  partSoft[0] = 0;   // the caret's own line keeps its kind (unless a pasted soft line lands on it)
+  if (parts.size() > 1)
+    for (size_t i = 0; i < parts.size(); i++)
+      if (parts[i] == SoftBlank()) { parts[i].clear(); partSoft[i] = 1; }
+  int L0 = m_caret.line;
+  std::string tail = m_lines[L0].substr(m_caret.col);
+  m_lines[L0] = m_lines[L0].substr(0, m_caret.col) + parts[0];
+  if (parts.size() > 1 && partSoft[0] && m_lines[L0].empty() && tail.empty()) m_soft[L0] = 1;
+  for (size_t i = 1; i < parts.size(); i++)
+  {
+    m_lines.insert(m_lines.begin() + L0 + i, parts[i]);
+    m_soft.insert(m_soft.begin() + L0 + i, partSoft[i]);
+  }
+  int lastLine = L0 + (int)parts.size() - 1;
   int col = (int)m_lines[lastLine].size();
   m_lines[lastLine] += tail;
   m_caret = m_anchor = { lastLine, col };
@@ -223,11 +303,13 @@ void TextEdit::InsertCodepoint(unsigned cp)
   InsertText(s);
 }
 
-void TextEdit::Newline()
+// Return: a hard line (an empty one separates blocks). Shift+Return: a soft line (stays in the
+// block even when empty).
+void TextEdit::Newline(bool soft)
 {
   if (m_readOnly || m_single) return;
   if (onBeforeNewline) onBeforeNewline();
-  InsertText("\n");
+  InsertText("\n", soft);
 }
 
 void TextEdit::Backspace()
@@ -245,9 +327,11 @@ void TextEdit::Backspace()
   else if (m_caret.line > 0)
   {
     PushUndo(3);
+    FixSoft();
     int col = (int)m_lines[m_caret.line - 1].size();
     m_lines[m_caret.line - 1] += m_lines[m_caret.line];
     m_lines.erase(m_lines.begin() + m_caret.line);
+    m_soft.erase(m_soft.begin() + m_caret.line);
     m_caret = m_anchor = { m_caret.line - 1, col };
     Changed();
   }
@@ -268,8 +352,10 @@ void TextEdit::DeleteForward()
   else if (m_caret.line + 1 < (int)m_lines.size())
   {
     PushUndo(3);
+    FixSoft();
     L += m_lines[m_caret.line + 1];
     m_lines.erase(m_lines.begin() + m_caret.line + 1);
+    m_soft.erase(m_soft.begin() + m_caret.line + 1);
     Changed();
   }
 }
@@ -473,6 +559,10 @@ bool TextEdit::OnMouse(UINT msg, WPARAM wp, int x, int y)
       return true;
     }
     TEPos p = PosFromPoint(x, y);
+    // counted here so it works whether or not the window gets WM_LBUTTONDBLCLK (SWELL)
+    int n = m_clicks.Click(GetTickCount(), x, y, DoubleClickMs());
+    if (n >= 3) { SelectLine(p.line); m_drag = false; return true; }   // triple-click: the line
+    if (n == 2) { SelectWordAt(p); m_drag = false; return true; }
     SetCaret(p, ShiftDown());
     m_preferredX = -1;
     m_drag = true;
@@ -481,14 +571,9 @@ bool TextEdit::OnMouse(UINT msg, WPARAM wp, int x, int y)
   if (msg == WM_LBUTTONDBLCLK)
   {
     if (!HitTest(x, y)) return false;
-    // select word
-    TEPos p = PosFromPoint(x, y);
-    const std::string& L = m_lines[p.line];
-    int a = p.col, b = p.col;
-    auto isWord = [](unsigned char c) { return c > ' ' && c != ',' && c != '.' && c != ';'; };
-    while (a > 0 && isWord(L[a - 1])) a--;
-    while (b < (int)L.size() && isWord(L[b])) b++;
-    m_anchor = { p.line, a }; m_caret = { p.line, b };
+    m_clicks.SetDouble(GetTickCount(), x, y);   // the next quick click is the third
+    SelectWordAt(PosFromPoint(x, y));
+    m_drag = false;
     return true;
   }
   if (msg == WM_MOUSEMOVE)
@@ -540,7 +625,7 @@ bool TextEdit::HandleVK(int vk, bool shift, bool ctrl)
   case VK_INSERT: if (ctrl) CopySelection(); else if (shift) PasteClipboard(); return true;
   case VK_RETURN:
     if (m_single) { if (onEnterSingle) onEnterSingle(); }
-    else Newline();
+    else Newline(shift);   // Shift+Return: soft line
     return true;
   case VK_ESCAPE: if (onEscape) onEscape(); return true;
   case VK_TAB: return true;

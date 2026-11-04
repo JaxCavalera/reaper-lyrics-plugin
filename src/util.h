@@ -1,5 +1,6 @@
 #pragma once
 #include "platform.h"
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -68,6 +69,29 @@ double WheelZoomFactor(int wheelDelta);                // 1.25 per notch (120), 
 // the new start. *hitAt (optional) gets the target snapped to, or -1 when nothing snapped.
 double SnapTime(double t, const std::vector<double>& targets, double tol, double* hitAt = nullptr);
 double SnapSpan(double start, double len, const std::vector<double>& targets, double tol, double* hitAt = nullptr);
+
+// A soft empty line (made with Shift+Enter) stays inside its block, where an ordinary empty
+// line separates blocks. In the lyric text, the clipboard and the stored document it is a line
+// holding just a no-break space: every "blank line" test (Trim) sees it as a line with content,
+// and it shows as empty wherever it is drawn.
+inline const char* SoftBlank() { return "\xC2\xA0"; }
+// The run of blank lines (Trim-empty) around line ln: *first..*last.
+void BlankRun(const std::vector<std::string>& lines, int ln, int* first, int* last);
+
+// Single, double and triple clicks: Click() returns 1, 2, 3, ... for clicks that follow each
+// other within dblMs and a few pixels; SetDouble() records a system double-click message.
+struct ClickCounter
+{
+  unsigned long tick = 0; int x = 0, y = 0, count = 0;
+  int Click(unsigned long now, int px, int py, unsigned long dblMs)
+  {
+    bool follows = count > 0 && now - tick <= dblMs && std::abs(px - x) <= 4 && std::abs(py - y) <= 4;
+    count = follows ? count + 1 : 1;
+    tick = now; x = px; y = py;
+    return count;
+  }
+  void SetDouble(unsigned long now, int px, int py) { tick = now; x = px; y = py; count = 2; }
+};
 
 // Where a key pressed in the sequencer window goes. wantsKeys: the lyric text was clicked
 // into, or a label is being renamed.

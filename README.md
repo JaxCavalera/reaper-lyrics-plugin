@@ -62,7 +62,11 @@ lines are laid out in full colour and can be moved, stretched and reordered.
     to rename it straight away; right-click (or click the grip on the right of a label chip)
     for label presets, colour, delete;
   - below the lane, the **lyric text**: one blank line starts a new block. Edits are diffed
-    against the existing blocks so timings survive typing. Drag a label chip in the gutter
+    against the existing blocks so timings survive typing. **Shift+Enter** makes a *soft*
+    line instead: left empty, it is a gap inside the block (drawn with a dashed mark in the
+    block colour) rather than a block break, and it gets its own slot in the block's timing.
+    Right-click an empty soft line → **Insert breakpoint** to split the block there;
+    right-click the empty line between two blocks → **Remove breakpoint** to join them. Drag a label chip in the gutter
     up or down to move a whole block: a see-through copy of the label follows the mouse and
     the other labels slide out of the way to show where it will land. Moving blocks never
     changes any block's label or colour;
@@ -207,7 +211,8 @@ space, shortcuts and Ctrl+C/V work on the project as usual even with the sequenc
 Even while typing, F-keys and Ctrl shortcuts the text doesn't use (Ctrl+S, ...) go to REAPER.
 
 Text keys: the usual — arrows, Home/End, PgUp/PgDn, Shift to select, Ctrl+A/C/X/V,
-Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo within the text.
+Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo/redo within the text. Enter starts a new line,
+Shift+Enter a soft line (see above). Double-click selects a word, triple-click the whole line.
 
 ## Layout
 

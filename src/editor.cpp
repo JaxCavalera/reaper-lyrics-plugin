@@ -27,7 +27,7 @@ enum { BTN_TRACKSEL = 1, BTN_TRACK, BTN_PANEL, BTN_ZOOM_OUT, BTN_ZOOM_IN, BTN_ZO
 static const int kSnapPx = 10;   // snap distance on screen
 enum { MENU_RENAME = 1, MENU_DELETE, MENU_GOTO, MENU_LABEL_PRESET = 10, MENU_LABEL_AUTO = 30, MENU_COLOR_PRESET = 40, MENU_COLOR_CUSTOM = 60, MENU_COLOR_AUTO, MENU_TRACK = 100,
        MENU_RESTYLE = 900, MENU_LAYOUT_AUTO, MENU_LAYOUT_DEFAULT, MENU_LAYOUT = 1000,
-       MENU_TEXT_CUT = 1300, MENU_TEXT_COPY, MENU_TEXT_PASTE, MENU_TEXT_SELALL };
+       MENU_TEXT_CUT = 1300, MENU_TEXT_COPY, MENU_TEXT_PASTE, MENU_TEXT_SELALL, MENU_TEXT_BREAK_ADD, MENU_TEXT_BREAK_REMOVE };
 
 struct ColorPreset { const char* name; COLORREF c; };
 static const ColorPreset kColors[] = {
@@ -204,7 +204,7 @@ void LyricEditor::OpenForTrack(MediaTrack* t)
 void LyricEditor::RebuildLayout()
 {
   m_layout.clear();
-  const auto& lines = m_text.Lines();
+  const std::vector<std::string> lines = m_text.LogicalLines();   // soft empty lines stay in their block
   bool open = false; Layout cur;
   for (int i = 0; i < (int)lines.size(); i++)
   {
@@ -230,7 +230,7 @@ void LyricEditor::OnCopy(const std::string& text, TEPos a, TEPos b)
   std::vector<std::string> texts;
   for (size_t i = 0; i < m_layout.size(); i++) { spans.push_back({ m_layout[i].first, m_layout[i].last }); texts.push_back(g_doc.blocks[i].Text()); }
   std::vector<PastedBlock> got;
-  for (auto& c : CopiedBlocks(m_text.Lines(), spans, texts, a.line, a.col, b.line, b.col))
+  for (auto& c : CopiedBlocks(m_text.LogicalLines(), spans, texts, a.line, a.col, b.line, b.col))
     got.push_back(PastedBlock::From(g_doc.blocks[c.block], c.whole));
   std::string clip = StripCR(text);
   std::vector<std::string> clipLines = SplitLines(clip);
@@ -247,7 +247,7 @@ void LyricEditor::OnPaste(std::string& text)
   text = StripCR(text);
   if (!g_doc.IsBound() || m_clipBlocks.empty() || text != m_clipText || m_text.HasSelection()) return;
   int first = 0;
-  if (!PrepareBlockPaste(m_text.Lines(), m_text.Caret().line, text, &first)) return;
+  if (!PrepareBlockPaste(m_text.LogicalLines(), m_text.Caret().line, text, &first)) return;
   m_pendingPaste = m_clipBlocks;
   for (size_t k = 0; k < m_pendingPaste.size(); k++) m_pendingPaste[k].para = first + (int)k;
 }
@@ -267,10 +267,25 @@ void LyricEditor::ShowTextMenu(int x, int y)
   bool sel = m_text.HasSelection();
   bool any = false;
   for (auto& l : m_text.Lines()) if (!l.empty()) { any = true; break; }
+  // breakpoints: on an empty soft line (Shift+Enter) a breakpoint splits the block there; on
+  // the empty line(s) between two blocks it can be removed, joining them
+  int ln = m_text.Caret().line;
+  int r0 = -1, r1 = -1;
+  bool canSplit = !sel && !m_text.ReadOnly() && m_text.IsSoftBlank(ln);
+  bool canJoin = false;
+  if (!sel && !m_text.ReadOnly() && ln < (int)m_text.Lines().size() && Trim(m_text.Lines()[ln]).empty() && !m_text.IsSoft(ln))
+  {
+    const std::vector<std::string> lines = m_text.LogicalLines();
+    BlankRun(lines, ln, &r0, &r1);
+    canJoin = r0 > 0 && r1 + 1 < (int)lines.size();   // text on both sides
+  }
   HMENU m = CreatePopupMenu();
   AddMenu(m, MF_STRING | (sel ? 0 : MF_GRAYED), MENU_TEXT_CUT, "Cut\tCtrl+X");
   AddMenu(m, MF_STRING | (sel ? 0 : MF_GRAYED), MENU_TEXT_COPY, "Copy\tCtrl+C");
   AddMenu(m, MF_STRING | (m_text.CanPaste() ? 0 : MF_GRAYED), MENU_TEXT_PASTE, "Paste\tCtrl+V");
+  AddMenu(m, MF_SEPARATOR, 0, nullptr);
+  AddMenu(m, MF_STRING | (canSplit ? 0 : MF_GRAYED), MENU_TEXT_BREAK_ADD, "Insert breakpoint (split the block here)");
+  if (canJoin) AddMenu(m, MF_STRING, MENU_TEXT_BREAK_REMOVE, "Remove breakpoint (join the blocks)");
   AddMenu(m, MF_SEPARATOR, 0, nullptr);
   AddMenu(m, MF_STRING | (any ? 0 : MF_GRAYED), MENU_TEXT_SELALL, "Select all\tCtrl+A");
   POINT pt = { x, y }; ClientToScreen(m_hwnd, &pt);
@@ -280,6 +295,8 @@ void LyricEditor::ShowTextMenu(int x, int y)
   else if (cmd == MENU_TEXT_COPY) m_text.CopySelection();
   else if (cmd == MENU_TEXT_PASTE) m_text.PasteClipboard();
   else if (cmd == MENU_TEXT_SELALL) m_text.SelectAll();
+  else if (cmd == MENU_TEXT_BREAK_ADD) m_text.SetLinesSoft(ln, ln, false);       // soft -> hard
+  else if (cmd == MENU_TEXT_BREAK_REMOVE) m_text.SetLinesSoft(r0, r1, true);     // hard -> soft
   SetFocus(m_hwnd);
   Invalidate();
 }
@@ -300,7 +317,7 @@ void LyricEditor::RefreshText()
 {
   if (!m_hwnd) return;
   RebuildLayout();
-  std::string current = CanonicalText(m_text.Lines());
+  std::string current = CanonicalText(m_text.LogicalLines());
   std::string want = g_doc.IsBound() ? g_doc.ToText() : "";
   m_text.SetReadOnly(!g_doc.IsBound());
   if (current == want) { Invalidate(); return; }
@@ -329,7 +346,7 @@ void LyricEditor::OnEditChanged()
   if (g_doc.IsBound())
   {
     std::vector<PastedBlock> pasted; pasted.swap(m_pendingPaste);
-    g_doc.ApplyText(CanonicalText(m_text.Lines()), m_tracking ? &m_live : nullptr, pasted.empty() ? nullptr : &pasted);
+    g_doc.ApplyText(CanonicalText(m_text.LogicalLines()), m_tracking ? &m_live : nullptr, pasted.empty() ? nullptr : &pasted);
     if (g_doc.blocks.size() != m_layout.size()) RefreshText();
   }
   UpdateStatus();
@@ -502,8 +519,20 @@ void LyricEditor::PaintTextBackground(HDC dc)
         FillRectColor(dc, lr, Blend(kBg, c, 0.32));
       }
     }
+    // soft empty lines (Shift+Enter): a dashed mark in the block colour, so it reads as a gap
+    // inside the block rather than a block break
+    for (int ln = std::max(L.first, first); ln <= L.last && ln < last; ln++)
+    {
+      if (!m_text.IsSoftBlank(ln)) continue;
+      int y = m_text.LineY(ln) + lh / 2;
+      for (int x = rc.left + m_text.m_padX; x < rc.left + m_text.m_padX + 120; x += 8)
+      {
+        RECT d = { x, y, x + 4, y + 1 };
+        FillRectColor(dc, d, Blend(kBg, c, 0.6));
+      }
+    }
   }
-  if (g_doc.IsBound() && m_text.Lines().size() == 1 && m_text.Lines()[0].empty())
+  if (g_doc.IsBound() && m_text.Lines().size() == 1 && m_text.Lines()[0].empty() && !m_text.IsSoft(0))
   {
     // hint only - not part of the text; drawn over the block tint
     HGDIOBJ of = SelectObject(dc, m_fontUi);

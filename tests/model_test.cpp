@@ -4,6 +4,7 @@
 #include "api.h"
 #include "model.h"
 #include "trackstyle.h"
+#include "textedit.h"
 #include "util.h"
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+HINSTANCE g_hInst = nullptr;   // main.cpp's, needed by platform.cpp (not used by the tests)
 
 // ------------------------------------------------------------------ fake REAPER
 
@@ -611,6 +614,64 @@ int main()
     double e = SnapTime(B[1].end + 0.1, { g_cursor, B[0].start, B[0].end }, tol);
     g_doc.DragBlockEdge(1, false, e); Sync();
     CHECK(Near(B[1].end, g_cursor) && ItemFits());
+  }
+
+  // --- soft lines (Shift+Enter): an empty soft line stays inside its block; Return lines break
+  {
+    MediaTrack* t7 = LyricDoc::CreateLyricTrack(kProj);
+    g_cursor = 900.0;
+    g_doc.Bind(kProj, t7);
+    g_doc.AppendBlock(); Sync();
+    auto& B = g_doc.blocks;
+    TextEdit te(false);
+    auto apply = [&] { g_doc.ApplyText(CanonicalText(te.LogicalLines()), nullptr); Sync(); };
+    // "one" Shift+Enter Shift+Enter "two": a soft empty line between -> still one block
+    te.TypeText("one"); te.Newline(true); te.Newline(true); te.TypeText("two");
+    CHECK(te.Lines().size() == 3 && te.Lines()[1].empty() && te.IsSoftBlank(1));
+    apply();
+    CHECK(B.size() == 1 && B[0].lines.size() == 3 && B[0].lines[2].text == "two");
+    // "three" after Return Return: an empty hard line -> a new block
+    te.Newline(); te.Newline(); te.TypeText("three");
+    CHECK(!te.IsSoft(3) && te.Lines()[3].empty() && te.Lines()[4] == "three");
+    apply();
+    CHECK(B.size() == 2 && B[1].Text() == "three");
+    // Return then Shift+Enter: the empty line came from Return, so it is hard (a break)
+    te.Newline(); te.Newline(true); te.TypeText("four");
+    apply();
+    CHECK(B.size() == 3 && B[2].Text() == "four");
+    // the soft line survives the trip through the document and back into the text box
+    TextEdit te2(false);
+    te2.SetText(g_doc.ToText());
+    CHECK(te2.IsSoftBlank(1) && te2.Lines()[1].empty() && te2.LogicalLines() == te.LogicalLines());
+    g_doc.Bind(kProj, t7);
+    CHECK(B.size() == 3 && B[0].lines.size() == 3);                         // and through storage
+    // Insert breakpoint on the soft empty line: hard -> block 0 splits in two
+    te.SetLinesSoft(1, 1, false);
+    apply();
+    CHECK(B.size() == 4 && B[0].Text() == "one" && B[1].Text() == "two");
+    // Remove breakpoint: the empty line(s) between "one" and "two" become soft -> joined again
+    int r0 = -1, r1 = -1;
+    BlankRun(te.LogicalLines(), 1, &r0, &r1);
+    CHECK(r0 == 1 && r1 == 1);
+    te.SetLinesSoft(r0, r1, true);
+    apply();
+    CHECK(B.size() == 3 && B[0].lines.size() == 3);
+    // pasting text with a soft empty line keeps it soft
+    TextEdit te3(false);
+    te3.TypeText(std::string("x\n") + SoftBlank() + "\ny");
+    CHECK(te3.Lines()[1].empty() && te3.IsSoftBlank(1) && te3.Lines()[2] == "y");
+    // a soft line with text on it is an ordinary lyric line
+    te3.SetCaret({ 1, 0 }); te3.TypeText("mid");
+    CHECK(te3.Lines()[1] == "mid" && !te3.IsSoftBlank(1) && te3.LogicalLines()[1] == "mid");
+    // triple-click: the whole line
+    te3.SelectLine(1);
+    CHECK(te3.HasSelection() && te3.Caret().line == 1 && te3.Caret().col == 3);
+    ClickCounter cc;
+    CHECK(cc.Click(1000, 50, 50, 400) == 1 && cc.Click(1200, 51, 50, 400) == 2 && cc.Click(1400, 51, 51, 400) == 3);
+    CHECK(cc.Click(2500, 51, 51, 400) == 1);                                // too slow: starts again
+    CHECK(cc.Click(2600, 80, 51, 400) == 1);                                // moved: starts again
+    cc.SetDouble(3000, 10, 10);                                             // Windows' double-click message
+    CHECK(cc.Click(3100, 10, 10, 400) == 3);
   }
 
   // --- on the timeline the lyric item is a normal (empty MIDI) item showing only the block

@@ -68,7 +68,7 @@ set(INSTALL_DIR "${REAPER_RESOURCE_PATH}/UserPlugins")
 #   cmake -S . -B build -DLYRICS_BUILD_TESTS=ON && cmake --build build --config Release --target model_test
 option(LYRICS_BUILD_TESTS "Build the model tests" OFF)
 if(LYRICS_BUILD_TESTS)
-  set(TEST_SOURCES tests/model_test.cpp src/model.cpp src/trackstyle.cpp src/util.cpp)
+  set(TEST_SOURCES tests/model_test.cpp src/model.cpp src/trackstyle.cpp src/util.cpp src/textedit.cpp src/platform.cpp)
   if(WIN32)
     list(APPEND TEST_SOURCES WDL/WDL/win32_utf8.c)
   else()

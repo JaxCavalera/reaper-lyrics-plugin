@@ -2,6 +2,7 @@
 // area (no HWND of its own) so it behaves identically on Win32 and SWELL.
 #pragma once
 #include "platform.h"
+#include "util.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -21,9 +22,22 @@ public:
   void SetFont(HFONT f);
   void SetReadOnly(bool ro) { m_readOnly = ro; }
 
+  // Text in and out: a soft empty line is written as a line holding SoftBlank() (util.h).
   void SetText(const std::string& utf8);
   std::string GetText() const;
-  const std::vector<std::string>& Lines() const { return m_lines; }
+  const std::vector<std::string>& Lines() const { return m_lines; }   // as displayed (soft lines empty)
+  std::vector<std::string> LogicalLines() const;                       // soft empty lines as SoftBlank()
+
+  // Soft lines: made with Shift+Enter. Only matters while the line is empty (see util.h).
+  bool IsSoft(int line) const { return line >= 0 && line < (int)m_soft.size() && m_soft[line]; }
+  bool IsSoftBlank(int line) const;
+  void SetLinesSoft(int first, int last, bool soft);   // one undo step; fires onChange
+
+  // editing entry points (keys go through these too)
+  void TypeText(const std::string& s) { InsertText(s); }
+  void Newline(bool soft = false);
+  void SelectLine(int line);                            // the whole line's text (triple-click)
+  void SelectWordAt(TEPos p);                           // double-click
 
   int LineH() const { return m_lineH; }
   int TextTop() const { return m_rc.top + m_padY; }
@@ -73,12 +87,12 @@ public:
   int m_padX = 10, m_padY = 6;
 
 private:
-  void InsertText(const std::string& s);
+  void InsertText(const std::string& s, bool softNewLines = false);
   void InsertCodepoint(unsigned cp);
   void DeleteSelection();
   void Backspace();
   void DeleteForward();
-  void Newline();
+  void FixSoft();   // keep m_soft the same length as m_lines
   void MoveCaret(int dLine, int dCol, bool select);
   void MoveLineEdge(bool home, bool select);
   void MoveDocEdge(bool home, bool select);
@@ -97,7 +111,7 @@ private:
   RECT ScrollbarRect() const;
   RECT ThumbRect() const;
 
-  struct Snap { std::vector<std::string> lines; TEPos caret, anchor; };
+  struct Snap { std::vector<std::string> lines; std::vector<char> soft; TEPos caret, anchor; };
 
   HWND m_parent = nullptr;
   RECT m_rc = { 0, 0, 0, 0 };
@@ -105,6 +119,8 @@ private:
   int m_lineH = 20;
   bool m_single = false, m_readOnly = false, m_focus = false;
   std::vector<std::string> m_lines;
+  std::vector<char> m_soft;   // per line: made with Shift+Enter
+  ClickCounter m_clicks;
   TEPos m_caret, m_anchor;
   int m_firstLine = 0;
   int m_preferredX = -1;

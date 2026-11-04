@@ -249,6 +249,14 @@ double WheelZoomFactor(int wheelDelta)
   return down ? 1.0 / f : f;
 }
 
+void BlankRun(const std::vector<std::string>& lines, int ln, int* first, int* last)
+{
+  int a = ln, b = ln;
+  while (a > 0 && Trim(lines[a - 1]).empty()) a--;
+  while (b + 1 < (int)lines.size() && Trim(lines[b + 1]).empty()) b++;
+  *first = a; *last = b;
+}
+
 double SnapTime(double t, const std::vector<double>& targets, double tol, double* hitAt)
 {
   double best = t, bestD = tol;
